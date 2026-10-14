@@ -120,7 +120,7 @@ def brief(store: Store, jobs: Jobs | None, online: bool | None = None) -> dict:
     last = store.reports(1)
     rep = store.get_report(last[0]["id"]) if last else None
     return {
-        "agent": "scholar", "busy": bool(run), "queue": jobs.queued() if jobs else 0,
+        "agent": CARD["id"], "busy": bool(run), "queue": jobs.queued() if jobs else 0,
         "job": {"id": run["id"], "q": _cut(run["question"], 60), "step": _cut(run["step"], 60),
                 "steps": run["steps"]} if run else None,
         "last": {"id": rep["id"], "q": _cut(rep["question"], 60),
@@ -348,9 +348,52 @@ def make_handler(store: Store, assistant: Assistant | None, researcher: Research
                 if assistant is None:
                     return self._send(503, {"error": "assistant not configured"})
                 try:
-                    return self._send(200, {"from": "scholar", "reply": ask(body["text"], sender)})
+                    return self._send(200, {"from": CARD["id"], "reply": ask(body["text"], sender)})
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
+            if path == "/api/review" and body.get("path"):
+                # Defensive review: read-only pattern scan, offline, inside Builder's allowed folders only.
+                cfg = getattr(assistant, "config", None)
+                if cfg is None:
+                    return self._send(503, {"error": "builder not configured for review"})
+                from . import audit
+                from .projects import ScopeError
+                try:
+                    findings = audit.scan_path(body["path"], cfg)
+                except ScopeError as e:
+                    return self._send(403, {"error": str(e)})
+                return self._send(200, {"from": CARD["id"], "path": body["path"],
+                                        "findings": [f.as_dict() for f in findings]})
+            if path == "/api/build" and body.get("task") and body.get("dir"):
+                # Build a small project and run its tests, inside scope, on the local coder model.
+                if assistant is None or getattr(assistant, "config", None) is None:
+                    return self._send(503, {"error": "builder not configured for build"})
+                cfg = assistant.config
+                from .buildagent import make_propose
+                from .projects import Project, ScopeError, build_and_test
+                try:
+                    proj = Project(body["dir"], cfg)
+                except ScopeError as e:
+                    return self._send(403, {"error": str(e)})
+                blm = assistant.llm
+                if not blm.available():
+                    return self._send(503, {"error": "local coder model not reachable (is Ollama running?)"})
+
+                def _gen(prompt):
+                    sysmsg = ("You are Builder, a careful coder. You write small, correct, self-contained "
+                              "projects and the tests that prove them, and never touch the network or files "
+                              "outside the project.")
+                    return blm.chat([{"role": "system", "content": sysmsg},
+                                     {"role": "user", "content": prompt}]).get("content", "")
+
+                try:
+                    with brain:
+                        result = build_and_test(proj, make_propose(_gen, body["task"], log=lambda m: None),
+                                                max_tries=int(body.get("tries", 3)))
+                except LLMError as e:
+                    return self._send(502, {"error": str(e)})
+                return self._send(200, {"from": CARD["id"], "ok": result["ok"], "attempts": result["attempts"],
+                                        "diff": result["diff"], "dir": str(proj.root)})
             with lock:
                 try:
                     if path == "/api/inbox/read":
@@ -373,7 +416,7 @@ def make_handler(store: Store, assistant: Assistant | None, researcher: Research
                         mode = "plan" if path == "/api/plan" else "research"
                         if body.get("async"):
                             job = jobs.submit(body.get("question") or body["idea"], depth, mode, sender)
-                            return self._send(202, {"from": "scholar", "job_id": job["id"],
+                            return self._send(202, {"from": CARD["id"], "job_id": job["id"],
                                                     "status": job["status"], "poll": f"/api/jobs/{job['id']}"})
                         if jobs and jobs.running():
                             return self._send(409, {"error": "busy with another investigation — send "
@@ -387,7 +430,7 @@ def make_handler(store: Store, assistant: Assistant | None, researcher: Research
                                                    body.get("depth", "standard"), "plan" if path == "/api/plan" else "research")
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
-                return self._send(200, {"from": "scholar", "report_id": r["report_id"],
+                return self._send(200, {"from": CARD["id"], "report_id": r["report_id"],
                                         "markdown": r["markdown"], "data": r["data"]})
             self._send(404, {"error": "not found"})
 
@@ -468,7 +511,7 @@ def make_handler(store: Store, assistant: Assistant | None, researcher: Research
     return Handler
 
 
-MODEL_ID = "scholar"
+MODEL_ID = CARD["id"]
 
 
 class _Locked:

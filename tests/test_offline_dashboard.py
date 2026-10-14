@@ -99,10 +99,10 @@ def test_openai_compatible_chat_for_open_webui(tmp_path):
     httpd, base, _ = _serve(store, a, researcher)
     try:
         models = json.loads(urllib.request.urlopen(base + "/v1/models").read())
-        assert models["data"][0]["id"] == "scholar"
+        assert models["data"][0]["id"] == "builder"
         msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"},
                 {"role": "user", "content": [{"type": "text", "text": "what about lithium?"}]}]
-        r = json.loads(_post(base + "/v1/chat/completions", {"model": "scholar", "messages": msgs}))
+        r = json.loads(_post(base + "/v1/chat/completions", {"model": "builder", "messages": msgs}))
         assert r["choices"][0]["message"]["content"] == "Answer [S1] to: what about lithium?"
         assert a.asked[-1][0] == msgs[:2]  # conversation history comes from the app, not stale memory
         stream = _post(base + "/v1/chat/completions", {"messages": msgs, "stream": True})
@@ -124,7 +124,7 @@ def test_device_sync_dashboard_and_voice_upload(tmp_path):
     httpd, base, handler = _serve(store, a, voice=FakeVoice(), web=web)
     try:
         page = urllib.request.urlopen(base + "/").read().decode()
-        assert "<title>Scholar Dashboard</title>" in page and "/api/brief" in page
+        assert "<title>Builder Dashboard</title>" in page and "/api/brief" in page
         out = json.loads(_post(base + "/api/sync", {"device": "pocket", "items": [
             {"kind": "ask", "text": "How big is the e-bike battery market?"}]}))
         assert out["queued"] == 1 and out["say"].startswith("While I was offline you asked me")

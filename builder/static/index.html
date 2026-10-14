@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scholar Dashboard</title>
+<title>Builder Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎓%3C/text%3E%3C/svg%3E">
 <style>
   /* Same look as AMO's dashboard, so the family feels like one system. Everything is inline: works offline. */
@@ -83,7 +83,7 @@
 <body>
 <header>
   <div>
-    <h1>🎓 Scholar</h1>
+    <h1>🛠️ Builder</h1>
     <div class="mut small-t">The Researcher of the AI family</div>
   </div>
   <div class="pills">
@@ -122,7 +122,7 @@
     </div>
 
     <div class="card">
-      <h2>Ask Scholar</h2>
+      <h2>Ask Builder</h2>
       <form class="ask" id="askform">
         <input id="q" placeholder="Ask about anything I've researched…" autocomplete="off">
         <button type="button" id="mic" class="icon" title="Talk">🎤</button>
@@ -193,7 +193,7 @@
 
 <section data-panel="lessons" hidden>
   <div class="card">
-    <h2>Teach Scholar</h2>
+    <h2>Teach Builder</h2>
     <form id="lessonform" class="bar-row">
       <input type="text" id="ltext" placeholder="e.g. Always show prices in a table" required>
       <select id="lkind"><option>preference</option><option>correction</option><option>strategy</option><option>source_note</option></select>
@@ -218,7 +218,7 @@ function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add(
 async function api(path, opts = {}, tries = 0) {
   const r = await fetch(path, {...opts, headers: {"Content-Type": "application/json", ...auth(), ...(opts.headers || {})}});
   if (r.status === 401 && tries < 2) {
-    key = prompt("Scholar's API key (SCHOLAR_API_TOKEN):") || "";
+    key = prompt("Builder's API key (BUILDER_API_TOKEN):") || "";
     try { localStorage.setItem("scholar_key", key); } catch {}
     return api(path, opts, tries + 1);
   }
@@ -292,7 +292,7 @@ async function refresh() {
     $("p-busy").textContent = b.busy ? `researching… ${b.queue ? "(+" + b.queue + " queued)" : ""}` : "idle";
     $("p-busy").className = "pill " + (b.busy ? "busy" : "");
     $("p-inbox").hidden = !b.unread; $("p-inbox").textContent = `✉ ${b.unread} new`;
-  } catch (e) { $("p-net").textContent = "can't reach Scholar"; $("p-net").className = "pill bad"; }
+  } catch (e) { $("p-net").textContent = "can't reach Builder"; $("p-net").className = "pill bad"; }
 }
 async function loadHome() {
   try {

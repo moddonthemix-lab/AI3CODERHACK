@@ -1,4 +1,4 @@
-"""Scholar — the research member of the AI family: a local, private research
-analyst and business strategist that cites its sources."""
+"""Builder — the coder & security engineer of the AI family: builds and tests
+things, and defends your own systems. Runs locally on Ollama."""
 
 __version__ = "0.1.0"

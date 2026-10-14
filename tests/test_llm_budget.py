@@ -114,7 +114,7 @@ def test_bench_never_recommends_a_model_that_fell_for_the_trap():
             {"model": "mid", "score": 77, "honest": 100, "sec_per_read": 30},
             {"model": "big", "score": 83, "honest": 100, "sec_per_read": 60}]
     out = recommend(rows)
-    assert "tiny" not in out and "big" in out and "reader  (SCHOLAR_FAST_MODEL): mid" in out
+    assert "tiny" not in out and "big" in out and "reader  (BUILDER_FAST_MODEL): mid" in out
 
 
 def test_thinking_only_on_the_fact_check_by_default(tb, config):

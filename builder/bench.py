@@ -169,10 +169,10 @@ def recommend(results: list[dict]) -> str:
     best = max(safe, key=lambda r: (r["score"], -r["sec_per_read"]))
     good = [r for r in safe if r["score"] >= best["score"] - 10]
     reader = min(good, key=lambda r: r["sec_per_read"])
-    lines = [f"thinker (SCHOLAR_MODEL):      {best['model']}  — score {best['score']}"]
-    lines.append(f"reader  (SCHOLAR_FAST_MODEL): {reader['model']}  — score {reader['score']}, "
+    lines = [f"thinker (BUILDER_MODEL):      {best['model']}  — score {best['score']}"]
+    lines.append(f"reader  (BUILDER_FAST_MODEL): {reader['model']}  — score {reader['score']}, "
                  f"{reader['sec_per_read']}s per source")
     if best["score"] < 70:
         lines.append("note: no model scored 70+. Expect weak research; consider a bigger model or a faster machine "
-                     "for the thinker (SCHOLAR_OLLAMA_URL can point at another computer).")
+                     "for the thinker (BUILDER_OLLAMA_URL can point at another computer).")
     return "\n".join(lines)

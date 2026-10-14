@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "builder"
 version = "0.1.0"
-description = "Scholar — the Researcher of the AI family: a local, private research analyst that cites its sources."
+description = "Builder — the coder & security engineer of the AI family: builds and tests things, and defends your own systems. Runs locally on Ollama."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []  # core runs on the standard library + Ollama

@@ -25,8 +25,8 @@ def test_cli_library_roundtrip(tmp_path, monkeypatch, capsys):
     assert main(["calc", "open('x')"]) == 1
     out = capsys.readouterr().out
     assert "F1 is now disputed" in out and "new survey disagrees" in out and "34.375" in out
-    assert '"profit_per_unit": 27.15' in out and '"family_role": "Researcher"' in out
-    assert (tmp_path / "scholar.db").exists()
+    assert '"profit_per_unit": 27.15' in out and '"family_role": "Coder & security engineer"' in out
+    assert (tmp_path / "builder.db").exists()
 
 
 def _serve(store, researcher=None, token=""):
@@ -52,14 +52,14 @@ def test_api_card_findings_and_research(tmp_path):
     researcher = Researcher(Toolbox(store, FakeWeb()), RoutingLLM(), Config(home=tmp_path))
     httpd, base = _serve(store, researcher)
     try:
-        assert _req(base + "/api/health") == (200, {"ok": True, "agent": "scholar"})
+        assert _req(base + "/api/health") == (200, {"ok": True, "agent": "builder"})
         card = _req(base + "/api/agent")[1]
-        assert card["id"] == "scholar" and card["library"]["findings"] == 1
+        assert card["id"] == "builder" and card["library"]["findings"] == 1
         assert _req(base + "/api/findings?q=margins")[1][0]["id"] == fid
         f = _req(f"{base}/api/findings/{fid}")[1]
         assert f["history"][0]["status"] == "reported"
         status, body = _req(base + "/api/research", "POST", {"question": "q?", "depth": "quick", "from": "amo"})
-        assert status == 200 and body["from"] == "scholar" and body["report_id"]
+        assert status == 200 and body["from"] == "builder" and body["report_id"]
         assert _req(f"{base}/api/reports/{body['report_id']}")[0] == 200
         assert _req(base + "/api/research", "POST", {"question": "q?", "depth": "forever"})[0] == 400
         assert _req(base + "/api/ask", "POST", {"text": "hi"})[0] == 503

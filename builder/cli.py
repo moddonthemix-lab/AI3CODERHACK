@@ -1,4 +1,4 @@
-"""Command line: talk to Scholar, run research, or browse his library directly."""
+"""Command line: talk to Builder, run research, or browse his library directly."""
 
 from __future__ import annotations
 
@@ -39,13 +39,13 @@ def _print_rows(rows: list[dict], cols: list[str], width: int = 70) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="scholar", description="Scholar — the Researcher of your AI family.")
+    p = argparse.ArgumentParser(prog="scholar", description="Builder — the Researcher of your AI family.")
     sub = p.add_subparsers(dest="cmd")
 
-    sub.add_parser("chat", help="Talk to Scholar in the terminal")
-    v = sub.add_parser("voice", help="Talk to Scholar out loud (press Enter, then speak)")
+    sub.add_parser("chat", help="Talk to Builder in the terminal")
+    v = sub.add_parser("voice", help="Talk to Builder out loud (press Enter, then speak)")
     v.add_argument("--hands-free", action="store_true", help="listen continuously, no Enter needed")
-    v = sub.add_parser("say", help="Hear Scholar read something (e.g. a report's answer)")
+    v = sub.add_parser("say", help="Hear Builder read something (e.g. a report's answer)")
     v.add_argument("text", nargs="*")
     v.add_argument("--report", type=int, help="read the answer of this report aloud")
     for name, helptext in (("research", "Investigate a question and write a cited report"),
@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("citations", help="Follow a paper's citations through OpenAlex")
     s.add_argument("doi")
     s.add_argument("--cited-by", action="store_true", help="newer work citing it, instead of what it cites")
-    s = sub.add_parser("ingest", help="Add your own documents (file or folder) to Scholar's library")
+    s = sub.add_parser("ingest", help="Add your own documents (file or folder) to Builder's library")
     s.add_argument("path")
     s.add_argument("--tier", type=int, choices=[1, 2, 3, 4], default=2, help="how much to trust them (default 2)")
 
@@ -88,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--source", type=int, action="append", default=[])
     a.add_argument("--reason", required=True)
 
-    s = sub.add_parser("sources", help="Sources Scholar has read")
+    s = sub.add_parser("sources", help="Sources Builder has read")
     s.add_argument("query", nargs="*")
     sub.add_parser("reports", help="List research reports")
     s = sub.add_parser("report", help="Print a report")
@@ -128,19 +128,19 @@ def build_parser() -> argparse.ArgumentParser:
     labsub.add_parser("off", help="turn it off and clear all authorizations")
     lg = labsub.add_parser("log", help="show the security audit log (what Builder allowed/refused)")
     lg.add_argument("--limit", type=int, default=20)
-    s = sub.add_parser("glossary", help="Terms Scholar has learned")
+    s = sub.add_parser("glossary", help="Terms Builder has learned")
     s.add_argument("term", nargs="*")
-    s = sub.add_parser("feedback", help="Teach Scholar: a preference, correction, strategy or note about a source")
+    s = sub.add_parser("feedback", help="Teach Builder: a preference, correction, strategy or note about a source")
     s.add_argument("text", nargs="+")
     s.add_argument("--kind", choices=LESSON_KINDS, default="preference")
     s.add_argument("--report", type=int)
     s.add_argument("--finding", type=int)
-    s = sub.add_parser("lessons", help="What Scholar has learned from your feedback")
+    s = sub.add_parser("lessons", help="What Builder has learned from your feedback")
     s.add_argument("--retire", type=int, help="stop applying this lesson")
     sub.add_parser("reindex", help="Rebuild semantic memory (e.g. after switching to Qdrant)")
     sub.add_parser("pending", help="Work waiting for the internet (offline rechecks, questions from devices)")
     sub.add_parser("sync", help="Catch up now: answer queued questions, run queued research if online")
-    s = sub.add_parser("inbox", help="Messages from Scholar (finished research, answers to queued questions)")
+    s = sub.add_parser("inbox", help="Messages from Builder (finished research, answers to queued questions)")
     s.add_argument("--all", action="store_true", help="include read messages")
 
     r = sub.add_parser("remember", help="Save a note")
@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--startup", type=float, nargs="+", default=[0])
     st.add_argument("--months", type=int, default=12)
 
-    sub.add_parser("card", help="Scholar's identity card and library stats")
+    sub.add_parser("card", help="Builder's identity card and library stats")
     s = sub.add_parser("serve", help="Run the JSON API for the rest of the family")
     s.add_argument("--host")
     s.add_argument("--port", type=int)
@@ -416,6 +416,68 @@ def _cmd_lab(args, config, db) -> int:
     return 0
 
 
+def _installed_models(url: str) -> list[str]:
+    """Models Ollama has pulled (from /api/tags). Empty list if Ollama can't be reached."""
+    import json as _json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + "/api/tags", timeout=4) as r:
+            return [m.get("name", "") for m in _json.loads(r.read()).get("models", [])]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _cmd_doctor(config, llm) -> int:
+    """`builder doctor`: check Ollama, the coder models, the sandbox and the code-folder scope."""
+    from . import sandbox
+    from .safety import Safety
+    from .db import Store
+
+    ok = True
+    def line(good, label, detail=""):
+        nonlocal ok
+        ok = ok and good
+        print(f"  {'✓' if good else '✗'} {label}" + (f" — {detail}" if detail else ""))
+
+    print("Builder doctor:\n")
+    # 1. Ollama + models
+    installed = _installed_models(config.ollama_url)
+    reachable = llm.available()
+    line(reachable, "Ollama is running", config.ollama_url if reachable else f"not reachable at {config.ollama_url}")
+    for role, m in (("thinker", config.model), ("reader", config.fast_model)):
+        have = any(name == m for name in installed)
+        line(have, f"{role} model {m}",
+             "installed" if have else (f"not pulled — run: ollama pull {m}" if reachable else "can't check (Ollama down)"))
+    # 2. Sandbox
+    try:
+        import tempfile
+        from pathlib import Path as _P
+        r = sandbox.run_python("print('sandbox-ok')", _P(tempfile.mkdtemp()))
+        line(r["ok"] and "sandbox-ok" in r["stdout"], "sandbox runs code", "no network, writes only in its own folder")
+    except Exception as e:  # noqa: BLE001
+        line(False, "sandbox runs code", str(e))
+    # 3. Code-folder scope
+    dirs = config.code_dirs
+    if not dirs:
+        line(False, "allowed code folders (BUILDER_CODE_DIRS)",
+             "not set — Builder can touch nothing until you set it (e.g. export BUILDER_CODE_DIRS=~/Projects)")
+    else:
+        from pathlib import Path as _P
+        missing = [d for d in dirs if not _P(d).expanduser().exists()]
+        line(not missing, "allowed code folders (BUILDER_CODE_DIRS)",
+             ", ".join(dirs) if not missing else f"these don't exist: {', '.join(missing)}")
+    # 4. Security mode (informational)
+    try:
+        db = Store(config.db_path)
+        s = Safety(db, config)
+        print(f"  • Authorized-lab mode: {'ON' if s.lab_enabled() else 'OFF (defensive mode only)'}")
+    except Exception:  # noqa: BLE001
+        pass
+
+    print("\n" + ("Builder is ready." if ok else "Some checks failed — see above. Builder still works for anything that passed."))
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = Config()
@@ -443,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.report:
                 r = db.get_report(args.report)
                 text = (r["data"].get("answer") if r else "") or "I couldn't find that report."
-            Voice(config.whisper_model, config.piper_voice, config.say_voice).say(text or "Hello. I'm Scholar.")
+            Voice(config.whisper_model, config.piper_voice, config.say_voice).say(text or "Hello. I'm Builder.")
         elif cmd in ("research", "plan"):
             result = Researcher(tb, llm, config, log=_progress, fast_llm=fast).investigate(
                 " ".join(args.text), args.depth, cmd)
@@ -558,11 +620,13 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_review(args, config, db, memory, llm)
         elif cmd == "lab":
             return _cmd_lab(args, config, db)
+        elif cmd == "doctor":
+            return _cmd_doctor(config, llm)
         elif cmd == "glossary":
             _print_rows(db.glossary(" ".join(args.term)), ["term", "domain", "definition"], 100)
         elif cmd == "feedback":
             ref = f"report:{args.report}" if args.report else f"finding:{args.finding}" if args.finding else ""
-            print(f"lesson #{memory.learn(' '.join(args.text), args.kind, ref=ref)} — Scholar will apply it from now on")
+            print(f"lesson #{memory.learn(' '.join(args.text), args.kind, ref=ref)} — Builder will apply it from now on")
         elif cmd == "lessons":
             if args.retire:
                 print("retired" if db.retire_lesson(args.retire) else "not found")
@@ -616,8 +680,6 @@ def main(argv: list[str] | None = None) -> int:
             serve(db, Assistant(tb, llm, config), Researcher(tb, llm, config, log=_progress, fast_llm=fast),
                   args.host or config.api_host, args.port or config.api_port, config.api_token, memory,
                   Jobs(job_researcher), Voice(config.whisper_model, config.piper_voice, config.say_voice), web)
-        elif cmd == "doctor":
-            return doctor(config, llm, web, memory, fast)
         elif cmd == "hub":
             return hub_command(config, args)
         elif cmd == "bench":
@@ -646,7 +708,7 @@ def hub_command(config: Config, args) -> int:
         return 1
     hub = conn.hub
     if not hub.token:
-        print("No hub token. Set HUB_TOKEN in Scholar's .env (make it on the hub: python3 -m hub agent token scholar).",
+        print("No hub token. Set HUB_TOKEN in Builder's .env (make it on the hub: python3 -m hub agent token builder).",
               file=sys.stderr)
         return 1
     try:
@@ -668,7 +730,7 @@ def hub_command(config: Config, args) -> int:
         print(f"☁️  Cloud brain ready: family research will use Claude{rem}.", file=sys.stderr)
     else:
         why = ("the anthropic package isn't installed (pip install 'scholar[cloud]')" if not cs["sdk"]
-               else "no ANTHROPIC_API_KEY in Scholar's .env" if not cs["key"]
+               else "no ANTHROPIC_API_KEY in Builder's .env" if not cs["key"]
                else "no internet" if not cs["online"]
                else "the hub budget is $0 or used up (set one on the hub's Admin page)")
         print(f"🏠 Cloud brain off — {why}. Family work will use the local model "
@@ -690,72 +752,6 @@ def _print_hits(db: Store, hits: list[dict], kind: str) -> None:
             print(f"      {r['snippet'][:200]}")
 
 
-def doctor(config: Config, llm: Ollama, web: Web, memory: ResearchMemory | None = None,
-           fast: Ollama | None = None) -> int:
-    ok = True
-    print(f"library: {config.db_path}")
-    print(f"reports: {config.reports_dir}")
-    print(f"profile: {config.profile} (context {config.num_ctx} tokens, reads {config.read_chars} characters per source)")
-    for role, m in (("thinker", llm), ("reader", fast or llm)):
-        if role == "reader" and m is llm:
-            print("reader:  same model as the thinker")
-            continue
-        print(f"{role}: {m.model} via {config.ollama_url}"
-              + (f"  (thinking: {config.think})" if role == "thinker" else ""))
-        if m.available():
-            print("  ✓ Ollama is reachable and the model is installed")
-            try:
-                if not m.talks_plainly():
-                    print(f"  ⚠ {m.model} thinks out loud even with thinking off — chat replies will be very slow. "
-                          "Use an Instruct edition (e.g. qwen3:4b-instruct) or a hybrid model (qwen3:8b).")
-            except LLMError as e:
-                print(f"  ⚠ couldn't test the model: {e}")
-        else:
-            ok = False
-            print(f"  ✗ not ready — install Ollama (https://ollama.com), then: ollama pull {m.model}")
-    print("         run `scholar bench` to measure accuracy and speed of models on this machine")
-    print("memory:  " + ("one model at a time (Scholar unloads the last one before switching)"
-                         if config.one_model_at_a_time else "several models may stay loaded (SCHOLAR_ONE_MODEL=0)"))
-    from .llm import loaded_models
-    loaded = [m for m in loaded_models(config.ollama_url) if "embed" not in m["name"]]
-    if loaded:
-        print("         loaded right now: " + ", ".join(f"{m['name']} ({m['size_gb']} GB)" for m in loaded))
-    if len(loaded) > 1:
-        print(f"  ⚠ {len(loaded)} chat models are in memory at once (maybe Amo's too). On a 16GB machine that "
-              "makes everything swap to disk and crawl. Make it a rule for every app on this Mac:\n"
-              "      launchctl setenv OLLAMA_MAX_LOADED_MODELS 1   (then quit and reopen Ollama)")
-    print("internet: " + ("off (SCHOLAR_OFFLINE=1)" if config.offline else "online" if web.online()
-                          else "OFFLINE — he'll answer from his library and queue research for later"))
-    print(f"search:  {'SearXNG at ' + config.searxng_url if config.searxng_url else 'DuckDuckGo (set SCHOLAR_SEARXNG_URL for your own SearXNG)'}")
-    for label, fn in (("web search", lambda: web.search("open source research tools", 3)),
-                      ("OpenAlex", lambda: web.openalex("information retrieval", 2)),
-                      ("arXiv", lambda: web._arxiv("information retrieval", 1)),
-                      ("Crossref", lambda: web._crossref("information retrieval", 1)),
-                      ("wikipedia", lambda: web.wikipedia("Library science", 1)),
-                      ("SEC filings", lambda: web.filings("annual report", limit=1))):
-        try:
-            print(f"  {'✓' if fn() else '?'} {label}")
-        except WebError as e:
-            print(f"  ✗ {label}: {e}")
-    if not config.openalex_key:
-        print("  · OpenAlex works best with a free key: SCHOLAR_OPENALEX_KEY (https://openalex.org/settings/api)")
-    print(f"documents: {'Docling ✓ (tables, layout)' if docling_available() else 'basic parsers — for real tables: pip install -e .[docs]'}")
-    if memory is not None:
-        where = f"Qdrant at {config.qdrant_url}" if config.qdrant_url else "built-in (scholar.db)"
-        n = memory.index.add([{"kind": "probe", "ref": "doctor", "text": "probe"}])
-        memory.index.remove("probe", ["doctor"])
-        if n:
-            print(f"memory:  semantic ✓ — {config.embed_model} → {where}")
-        else:
-            print(f"memory:  keyword-only ✗ — {memory.index.error or 'unavailable'}")
-            print(f"         fix: ollama pull {config.embed_model}" + ("" if not config.qdrant_url else ", and check Qdrant is running"))
-    wrapper = sandbox._wrapper(config.analysis_dir)
-    print(f"sandbox: python {sys.version.split()[0]}, no network" + (f" + {wrapper[0]}" if wrapper else " (audit hook only)"))
-    if config.tor_proxy:
-        print(f"tor:     SOCKS proxy {config.tor_proxy} (.onion sources: tier 4 — {TIER_LABELS[4]})")
-    else:
-        print("tor:     off (set SCHOLAR_TOR_PROXY=127.0.0.1:9050 to let Scholar read .onion sources)")
-    return 0 if ok else 1
 
 
 if __name__ == "__main__":
