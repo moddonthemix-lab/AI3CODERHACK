@@ -116,6 +116,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("path", help="a file or folder inside BUILDER_CODE_DIRS")
     s.add_argument("--no-model", action="store_true", help="pattern scan only (skip the local model pass)")
     s.add_argument("--no-save", action="store_true", help="don't record the findings in Builder's memory")
+    lab = sub.add_parser("lab", help="Authorized-lab mode: practice security ONLY on targets you confirm are yours")
+    labsub = lab.add_subparsers(dest="action", required=True)
+    labsub.add_parser("status", help="show whether lab mode is on and which targets are authorized")
+    on = labsub.add_parser("on", help="turn it on for a target you own / a practice target")
+    on.add_argument("target", help="the target (a CTF name, a local VM address, a practice app)")
+    on.add_argument("--kind", choices=["ctf", "vm", "local-app", "file", "lab"], default="lab")
+    on.add_argument("--note", default="")
+    on.add_argument("--i-own-this", action="store_true",
+                    help="confirm you own this target or it's made for practice (required to turn lab mode on)")
+    labsub.add_parser("off", help="turn it off and clear all authorizations")
+    lg = labsub.add_parser("log", help="show the security audit log (what Builder allowed/refused)")
+    lg.add_argument("--limit", type=int, default=20)
     s = sub.add_parser("glossary", help="Terms Scholar has learned")
     s.add_argument("term", nargs="*")
     s = sub.add_parser("feedback", help="Teach Scholar: a preference, correction, strategy or note about a source")
@@ -362,6 +374,48 @@ def _cmd_review(args, config, db, memory, llm) -> int:
     return 1  # non-zero so this can gate a pre-commit hook or CI
 
 
+def _cmd_lab(args, config, db) -> int:
+    """`builder lab`: turn authorized-lab mode on/off, see authorized targets, and read the audit log."""
+    from .safety import ApprovalRequired, Safety, SafetyError
+
+    err = lambda m: print(m, file=sys.stderr)
+    s = Safety(db, config)
+    action = getattr(args, "action", "status")
+
+    if action == "status":
+        st = s.status()
+        print("Authorized-lab mode: " + ("ON" if st["lab_enabled"] else "OFF (defensive mode only)"))
+        if st["targets"]:
+            print("Authorized targets:")
+            for t in st["targets"]:
+                print(f"  - {t['target']} ({t['kind']})" + (f" — {t['note']}" if t["note"] else ""))
+        else:
+            print("No authorized targets. Builder will only help defensively until you add one.")
+        return 0
+    if action == "on":
+        try:
+            rec = s.enable_lab(args.target, args.kind, args.note, confirmed=args.i_own_this)
+        except ApprovalRequired as e:
+            err(f"✗ {e}\n  Re-run with --i-own-this to confirm you own this target or it's for practice.")
+            return 1
+        except SafetyError as e:
+            err(f"✗ {e}")
+            return 1
+        print(f"✓ Authorized-lab mode ON for {rec['target']} ({rec['kind']}).")
+        print("  Builder will still ask before anything destructive, network-reaching, or installing software.")
+        print("  Turn it off any time with:  builder lab off")
+        return 0
+    if action == "off":
+        s.disable_lab()
+        print("✓ Authorized-lab mode OFF; all authorizations cleared. Back to defensive mode only.")
+        return 0
+    if action == "log":
+        _print_rows(db.safety_events(args.limit),
+                    ["at", "action", "decision", "target", "detail", "reason"], width=40)
+        return 0
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = Config()
@@ -502,6 +556,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_build(args, config, llm, memory)
         elif cmd == "review":
             return _cmd_review(args, config, db, memory, llm)
+        elif cmd == "lab":
+            return _cmd_lab(args, config, db)
         elif cmd == "glossary":
             _print_rows(db.glossary(" ".join(args.term)), ["term", "domain", "definition"], 100)
         elif cmd == "feedback":

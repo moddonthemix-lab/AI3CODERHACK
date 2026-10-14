@@ -231,6 +231,31 @@ CREATE TABLE IF NOT EXISTS reports (
     data        TEXT NOT NULL DEFAULT '{}',       -- structured JSON behind the markdown
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+
+-- Builder security: targets the boss has explicitly authorized for authorized-lab practice.
+-- Nothing is a valid target unless it's here and active; this is how "only my own / practice targets" is
+-- enforced in code, not by trusting the model.
+CREATE TABLE IF NOT EXISTS lab_authorizations (
+    id            INTEGER PRIMARY KEY,
+    target        TEXT NOT NULL,                  -- a host, VM, CTF name or local app the boss confirmed is his/practice
+    kind          TEXT NOT NULL DEFAULT 'lab',    -- ctf | vm | local-app | file | lab
+    note          TEXT NOT NULL DEFAULT '',
+    active        INTEGER NOT NULL DEFAULT 1,
+    authorized_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    revoked_at    TEXT
+);
+
+-- Builder security: an append-only audit log of every gated decision (allowed, refused, approved, denied)
+-- and every lab authorization change, so the boss can always see exactly what Builder did and why.
+CREATE TABLE IF NOT EXISTS safety_log (
+    id          INTEGER PRIMARY KEY,
+    action      TEXT NOT NULL,                    -- destructive | network | install | important_files | offense | target_check | lab_mode
+    decision    TEXT NOT NULL,                    -- allowed | refused | approved | denied | enabled | disabled
+    detail      TEXT NOT NULL DEFAULT '',
+    target      TEXT NOT NULL DEFAULT '',
+    reason      TEXT NOT NULL DEFAULT '',
+    at          TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 """
 
 # How sure Scholar is allowed to sound. Assigned by code from the evidence, not by the model.
@@ -405,6 +430,49 @@ class Store:
         return _rows(self.conn.execute(
             "SELECT * FROM finding_history WHERE finding_id = ? ORDER BY id", (finding_id,)
         ))
+
+    # -------------------------------------------------------- security: lab authorizations + audit log
+    def authorize_lab_target(self, target: str, kind: str = "lab", note: str = "") -> int:
+        """Record the boss's authorization of a practice target. Returns its id."""
+        return self._insert(
+            "INSERT INTO lab_authorizations(target, kind, note) VALUES (?, ?, ?)",
+            (target.strip(), kind, note),
+        )
+
+    def is_lab_target_authorized(self, target: str) -> bool:
+        if not target or not str(target).strip():
+            return False
+        row = self.conn.execute(
+            "SELECT 1 FROM lab_authorizations WHERE active = 1 AND target = ? LIMIT 1",
+            (str(target).strip(),)).fetchone()
+        return row is not None
+
+    def lab_targets(self, active_only: bool = True) -> list[dict]:
+        sql = "SELECT * FROM lab_authorizations"
+        if active_only:
+            sql += " WHERE active = 1"
+        return _rows(self.conn.execute(sql + " ORDER BY id DESC"))
+
+    def revoke_lab_targets(self, target: str | None = None) -> int:
+        """Deactivate one target (or all when target is None). Returns how many were revoked."""
+        with self.conn:
+            if target is None:
+                cur = self.conn.execute(
+                    "UPDATE lab_authorizations SET active = 0, revoked_at = datetime('now','localtime') WHERE active = 1")
+            else:
+                cur = self.conn.execute(
+                    "UPDATE lab_authorizations SET active = 0, revoked_at = datetime('now','localtime') "
+                    "WHERE active = 1 AND target = ?", (str(target).strip(),))
+            return cur.rowcount
+
+    def log_safety(self, action: str, decision: str, detail: str = "", target: str = "", reason: str = "") -> int:
+        return self._insert(
+            "INSERT INTO safety_log(action, decision, detail, target, reason) VALUES (?, ?, ?, ?, ?)",
+            (action, decision, detail, target, reason),
+        )
+
+    def safety_events(self, limit: int = 50) -> list[dict]:
+        return _rows(self.conn.execute("SELECT * FROM safety_log ORDER BY id DESC LIMIT ?", (limit,)))
 
     # ----------------------------------------------------------------- reports
     def add_report(self, question: str, body: str, mode: str = "research", data: dict | None = None) -> int:
