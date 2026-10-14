@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "builder"
+version = "0.1.0"
+description = "Scholar — the Researcher of the AI family: a local, private research analyst that cites its sources."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []  # core runs on the standard library + Ollama
+
+[project.optional-dependencies]
+docs = ["docling>=2.0"]                              # layout-aware PDF/DOCX/PPTX/XLSX parsing with real tables
+pdf = ["pypdf>=4"]                                   # lightweight PDF text fallback
+analysis = ["pandas>=2", "numpy>=1.24", "matplotlib>=3.7", "openpyxl>=3.1"]   # for the Python sandbox
+voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24", "soundfile>=0.12", "piper-tts>=1.2"]
+cloud = ["anthropic>=0.40"]                          # family cloud brain (Claude) for hub research; local mode needs nothing
+all = ["docling>=2.0", "pypdf>=4", "pandas>=2", "numpy>=1.24", "matplotlib>=3.7", "openpyxl>=3.1", "anthropic>=0.40"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+builder = "builder.cli:main"
+
+[tool.setuptools]
+packages = ["builder"]
+# Copied verbatim from the Family Hub repo (github.com/moddonthemix-lab/AIFAMINTERFACE).
+# Do not edit these here — update by re-copying. The connector (scholar/connector.py) uses them.
+py-modules = ["hub_client", "family_brain"]
+
+[tool.setuptools.package-data]
+builder = ["static/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
