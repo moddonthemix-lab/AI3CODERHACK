@@ -121,8 +121,8 @@ def test_build_task_posts_result_and_mirrors_reviews_to_both(db, tmp_path):
     # the security issue is posted to the hub (severity in the status field)...
     assert hub.findings[0]["channel"] == "technical-help" and hub.findings[0]["status"] == "high"
     # ...AND mirrored into Builder's own store with severity + fix
-    local = db.findings()
-    assert local and local[0]["claim"] == "Secret key hardcoded in app.py"
+    local = db.reviews()
+    assert local and local[0]["issue"] == "Secret key hardcoded in app.py"
     assert local[0]["severity"] == "high" and "env var" in local[0]["fix"]
 
 

@@ -35,7 +35,7 @@ def test_review_endpoint_scans_in_scope_and_refuses_outside(tmp_path):
     cfg = Config(home=tmp_path, code_dirs=[str(allowed)])
     store = Store(cfg.db_path)
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(store, FakeAssistant(cfg), None, token=""))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(store, FakeAssistant(cfg), token=""))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     try:

@@ -309,11 +309,10 @@ class BuilderConnector:
     def mirror_review_local(self, review: dict, sources: list[str], topic: str) -> None:
         """Also save the review (issue + severity + fix) into Builder's own store so he learns offline too."""
         try:
-            if self.db.conn.execute("SELECT 1 FROM findings WHERE claim = ? LIMIT 1",
-                                    (review["issue"],)).fetchone():
+            if self.db.review_exists(review["issue"]):
                 return                            # already in his store; don't duplicate
-            self.db.add_review_finding(review["issue"], review["severity"], review.get("fix", ""),
-                                       topic=(topic or "security")[:80])
+            self.db.add_review(review["issue"], review["severity"], review.get("fix", ""),
+                               topic=(topic or "security")[:80])
         except Exception as e:  # noqa: BLE001 — never let local mirroring break a hub post
             self.log(f"  (couldn't mirror review locally: {e})")
 

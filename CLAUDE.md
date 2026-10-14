@@ -16,11 +16,16 @@ family's cloud brain when configured, but never needs it.
   - `audit.py` — defensive security review (pattern scan + optional local-model pass); read-only, offline.
   - `safety.py` — the two security modes, the enforced gates, and the audit log.
   - `config.py`, `agent.py`, `server.py`, `cli.py`, `memory.py`, `db.py`, `llm.py`, `bench.py`.
+  - `memory.py` — lean, keyword-based memory (lessons + past security findings); works offline, no
+    embeddings. `assistant.py` — the chat loop (memory-aware, no research tools). `offline.py` — queue
+    work while offline and resume. `voice.py` — optional voice.
 - `hub_client.py`, `family_brain.py` — **copied verbatim** from the hub repo
   (`moddonthemix-lab/AIFAMINTERFACE`). Never edit here; update by re-copying.
-- Inherited from Scholar and kept but not central to Builder: `research.py`, `calc.py`, `documents.py`,
-  `credibility.py`, `web.py` (research tools). They remain so the shared test infrastructure and the
-  server keep working; Builder's own skills don't depend on them.
+
+Scholar's research engine has been fully removed — there is no `research.py`, `calc.py`, `documents.py`,
+`credibility.py`, `web.py`, `tools.py` or `vectors.py`. The store (`db.py`) holds only Builder's tables
+(memories, reviews, lessons, lab authorizations, safety log, pending, inbox); security findings live in
+their own `reviews` table, separate from anything else.
 
 ## Conventions
 

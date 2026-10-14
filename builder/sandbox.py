@@ -10,7 +10,7 @@ Two modes live here:
 
 ``run_python`` runs it in a separate process with:
 
-- its own empty working folder (``~/.scholar/analysis/run-N``) holding copies of the input tables
+- its own empty working folder (``~/.builder/analysis/run-N``) holding copies of the input tables
 - no network: socket connections are blocked by an audit hook (and on macOS also by
   ``sandbox-exec``; on Linux by a fresh network namespace when ``unshare`` allows it)
 - no subprocesses, no writing outside the working folder

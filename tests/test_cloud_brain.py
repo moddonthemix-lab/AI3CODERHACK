@@ -137,8 +137,8 @@ def test_cloud_code_uses_sonnet_without_web_and_reports_cost(db, tmp_path):
     assert "REVIEW_JSON" not in hub.results[0]["summary"]
     assert hub.usage and hub.usage[0]["cost_usd"] > 0            # the spend was reported to the hub
     # the security review is mirrored into Builder's own store with severity + fix
-    local = db.findings()
-    assert local and local[0]["claim"] == "Secret key hardcoded"
+    local = db.reviews()
+    assert local and local[0]["issue"] == "Secret key hardcoded"
     assert local[0]["severity"] == "high" and "env var" in local[0]["fix"]
 
 

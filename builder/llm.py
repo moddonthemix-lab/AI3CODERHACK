@@ -11,7 +11,7 @@ Three things here matter a lot on CPU-only machines (Intel Macs, Raspberry Pi):
   answering. That can be thousands of extra tokens — minutes on a CPU — so it is off
   for routine reading and only used where judgement matters (``SCHOLAR_THINK``).
 - ``stats``: prompt/answer token counts and timings for every call, so you can see
-  where the time goes (``scholar bench`` uses them).
+  where the time goes (``builder bench`` uses them).
 """
 
 from __future__ import annotations
