@@ -165,6 +165,8 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                 if url.path == "/api/reviews":
                     return self._send(200, store.reviews(qs.get("q", ""), qs.get("severity"),
                                                          int(qs.get("limit", 50))))
+                if url.path == "/api/builds":
+                    return self._send(200, store.builds(qs.get("q", ""), int(qs.get("limit", 25))))
                 if url.path == "/api/lessons":
                     return self._send(200, store.lessons())
                 if url.path == "/api/inbox":

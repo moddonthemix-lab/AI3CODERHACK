@@ -54,6 +54,11 @@
     <div id="reviews"><span class="empty">none yet — run <code>builder review &lt;path&gt;</code></span></div>
   </div>
 
+  <div class="panel">
+    <h2>Projects he's built</h2>
+    <div id="builds"><span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span></div>
+  </div>
+
 <script>
 const $ = id => document.getElementById(id);
 let TOKEN = "";
@@ -82,13 +87,20 @@ async function refresh() {
       (b.unread ? `<span class="pill">✉ ${b.unread} new</span>` : "");
     const s = await api("/api/stats");
     const sv = s.reviews_by_severity || { high: 0, med: 0, low: 0 };
-    const tiles = [["High", sv.high], ["Medium", sv.med], ["Low", sv.low], ["Lessons", s.lessons], ["Lab targets", s.lab_targets]];
+    const tiles = [["High", sv.high], ["Medium", sv.med], ["Low", sv.low],
+                   ["Built OK", (s.builds_passed || 0) + "/" + (s.builds || 0)], ["Lessons", s.lessons], ["Lab targets", s.lab_targets]];
     $("tiles").innerHTML = tiles.map(([l, n]) => `<div class="tile"><div class="n">${n || 0}</div><div class="l">${l}</div></div>`).join("");
     const rv = await api("/api/reviews?limit=25");
     $("reviews").innerHTML = rv.length ? rv.map(r =>
       `<div class="rev"><span class="sev ${r.severity}">${r.severity.toUpperCase()}</span>${esc(r.issue)}` +
       (r.fix ? `<div class="fix">fix: ${esc(r.fix)}</div>` : "") + `</div>`).join("")
       : `<span class="empty">none yet — run <code>builder review &lt;path&gt;</code></span>`;
+    const bl = await api("/api/builds?limit=20");
+    $("builds").innerHTML = bl.length ? bl.map(b =>
+      `<div class="rev"><span class="sev ${b.ok ? "low" : "high"}">${b.ok ? "PASS" : "FAIL"}</span>${esc(b.task)}` +
+      `<span style="color:var(--dim)"> · ${b.attempts} tr${b.attempts === 1 ? "y" : "ies"}</span>` +
+      (b.problem ? `<div class="fix">problem solved: ${esc(b.problem)}</div>` : "") + `</div>`).join("")
+      : `<span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span>`;
   } catch (e) {
     $("status").textContent = "can't reach Builder";
   }

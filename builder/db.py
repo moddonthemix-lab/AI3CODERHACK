@@ -283,6 +283,8 @@ class Store:
             "memories": one("SELECT COUNT(*) FROM memories"),
             "reviews": one("SELECT COUNT(*) FROM reviews"),
             "reviews_by_severity": {s: by_sev.get(s, 0) for s in SEVERITIES},
+            "builds": one("SELECT COUNT(*) FROM builds"),
+            "builds_passed": one("SELECT COUNT(*) FROM builds WHERE ok = 1"),
             "lessons": one("SELECT COUNT(*) FROM lessons WHERE active = 1"),
             "lab_targets": one("SELECT COUNT(*) FROM lab_authorizations WHERE active = 1"),
             "pending": one("SELECT COUNT(*) FROM pending WHERE done_at IS NULL"),
