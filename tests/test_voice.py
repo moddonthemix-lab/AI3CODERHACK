@@ -85,6 +85,8 @@ def test_voice_endpoints_for_an_esp32_terminal():
 
 
 def test_to_rate_for_esp32_speakers():
+    import pytest
+    pytest.importorskip("numpy")  # resampling needs numpy (the optional [voice] extra); skip cleanly without it
     from builder.voice import to_rate
     out = to_rate(_wav(1.0, rate=22050), 16000)
     assert wav_info(out) == {"channels": 1, "rate": 16000, "seconds": 1.0}

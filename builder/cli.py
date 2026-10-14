@@ -39,7 +39,18 @@ def _print_rows(rows: list[dict], cols: list[str], width: int = 70) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="scholar", description="Builder — the Researcher of your AI family.")
+    p = argparse.ArgumentParser(
+        prog="builder",
+        description="Builder — the coder & security engineer of your AI family. Builds and tests things, "
+                    "and defends your own systems. Runs locally on Ollama.",
+        epilog="Main commands:\n"
+               "  build   write a project, run its tests, fix failures, show the diff  (--undo to restore)\n"
+               "  review  defensive security audit of your own code/config (findings + fixes)\n"
+               "  lab     authorized-lab mode: on|off|status|log (off by default)\n"
+               "  doctor  check Ollama, the coder models, the sandbox and your code-folder scope\n"
+               "  chat    talk to Builder in the terminal   ·   serve  start the HTTP API + dashboard\n"
+               "\nFirst: set BUILDER_CODE_DIRS to the folders Builder may touch (e.g. ~/Projects).",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd")
 
     sub.add_parser("chat", help="Talk to Builder in the terminal")

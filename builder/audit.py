@@ -63,8 +63,8 @@ def _rx(p: str) -> re.Pattern:
 RULES: list[Rule] = [
     Rule("Hardcoded secret in source", "high",
          "Move secrets to environment variables or a secrets manager; never commit them. Rotate this one.",
-         re.compile(r"""(password|passwd|secret|api[_-]?key|access[_-]?key|token|private[_-]?key)\s*[:=]\s*['"][^'"]{6,}['"]""", re.I),
-         unless=_rx(r"(os\.environ|getenv|process\.env|example|changeme|your[_-]?|placeholder|\{\{|<%)")),
+         re.compile(r"""(password|passwd|secret|api[_-]?key|access[_-]?key|auth[_-]?token|token|private[_-]?key)\w*\s*[:=]\s*['"][^'"]{6,}['"]""", re.I),
+         unless=_rx(r"(os\.environ|getenv|process\.env|example|changeme|your[_-]?|placeholder|\{\{|<%|input\(|prompt\()")),
     Rule("AWS access key id in source", "high",
          "Remove the key, rotate it immediately, and load credentials from the environment or a profile.",
          re.compile(r"AKIA[0-9A-Z]{16}")),
