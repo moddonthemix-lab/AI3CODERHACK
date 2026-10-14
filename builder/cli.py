@@ -112,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--test", help="test command, e.g. \"pytest -q\" (auto-detected if omitted)")
     s.add_argument("--tries", type=int, default=3, help="how many fix-and-retry rounds (default 3)")
     s.add_argument("--undo", action="store_true", help="undo Builder's last build in --dir and exit")
+    s = sub.add_parser("review", help="Defensive security review of your own code/config (findings + fixes)")
+    s.add_argument("path", help="a file or folder inside BUILDER_CODE_DIRS")
+    s.add_argument("--no-model", action="store_true", help="pattern scan only (skip the local model pass)")
+    s.add_argument("--no-save", action="store_true", help="don't record the findings in Builder's memory")
     s = sub.add_parser("glossary", help="Terms Scholar has learned")
     s.add_argument("term", nargs="*")
     s = sub.add_parser("feedback", help="Teach Scholar: a preference, correction, strategy or note about a source")
@@ -229,8 +233,14 @@ _BUILD_SYSTEM = (
     "network or files outside the project. If something is unsafe or unclear, you say so instead of guessing."
 )
 
+_REVIEW_SYSTEM = (
+    "You are Builder doing a DEFENSIVE security review of code the owner wrote and wants hardened. You point "
+    "out real, specific weaknesses and give a concrete fix for each. You never explain how to attack anything "
+    "and never write exploit code — only how to defend. If the code looks fine, you say so."
+)
 
-def _cmd_build(args, config, llm) -> int:
+
+def _cmd_build(args, config, llm, memory=None) -> int:
     """`builder build`: write a small project, run its tests, fix failures, show the diff. All inside scope."""
     from .buildagent import make_propose
     from .projects import Project, ScopeError, build_and_test, restore_backup, save_backup
@@ -267,8 +277,18 @@ def _cmd_build(args, config, llm) -> int:
         return llm.chat([{"role": "system", "content": _BUILD_SYSTEM},
                          {"role": "user", "content": prompt}]).get("content", "")
 
+    # What Builder remembers about this kind of work (the boss's stack, past fixes, lessons) — works offline.
+    memory_note = ""
+    if memory is not None:
+        try:
+            memory_note = memory.as_prompt(memory.recall(task), max_chars=1500)
+        except Exception:  # noqa: BLE001 — memory is a help, never a blocker
+            memory_note = ""
+    if memory_note:
+        err("  (using what I remember about your stack and past fixes)")
+
     test_cmd = args.test.split() if args.test else None
-    propose = make_propose(generate, task, log=err)
+    propose = make_propose(generate, task, log=err, memory_note=memory_note)
     result = build_and_test(proj, propose, test_cmd=test_cmd, max_tries=args.tries, log=err)
     save_backup(proj, backup_path)
 
@@ -280,6 +300,66 @@ def _cmd_build(args, config, llm) -> int:
         err((t.get("stderr") or t.get("stdout"))[-1500:])
     err(f"Undo with:  builder build --undo --dir {args.dir}")
     return 0 if result["ok"] else 1
+
+
+def _cmd_review(args, config, db, memory, llm) -> int:
+    """`builder review`: defensive audit of your OWN code/config — findings with severity + fix. Offline-first."""
+    from . import audit
+    from .projects import ScopeError
+
+    err = lambda m: print(m, file=sys.stderr)
+    path = args.path
+
+    # What Builder already remembers about this area (lessons + past findings) — local, works offline.
+    if memory is not None:
+        try:
+            mem = memory.recall(f"security review {Path(path).name}")
+            note = memory.as_prompt({**mem, "library": [], "queries": [], "glossary": [], "entities": [],
+                                     "investigations": []}, max_chars=900)
+        except Exception:  # noqa: BLE001
+            note = ""
+        if note:
+            print("What I remember:\n" + note + "\n")
+
+    generate = None
+    if not args.no_model and llm.available():
+        err("  (also asking the local coder model for a context-aware pass)")
+
+        def generate(prompt: str) -> str:  # noqa: F811
+            return llm.chat([{"role": "system", "content": _REVIEW_SYSTEM},
+                             {"role": "user", "content": prompt}]).get("content", "")
+
+    try:
+        findings = audit.review(path, config, generate=generate, use_model=generate is not None)
+    except ScopeError as e:
+        err(f"✗ {e}\n  Set BUILDER_CODE_DIRS to the folders Builder may review (e.g. ~/Projects).")
+        return 1
+
+    if not findings:
+        print(f"✓ No defensive issues found in {path}. (Heuristics — still review by hand for logic flaws.)")
+        return 0
+
+    mark = {"high": "🔴 HIGH", "med": "🟠 MED ", "low": "🟡 LOW "}
+    print(f"{len(findings)} issue(s) in {path}, most serious first:\n")
+    for f in findings:
+        where = f"{f.file}:{f.line}" if f.line else f.file
+        print(f"{mark.get(f.severity, f.severity)}  {f.issue}" + (f"  ({where})" if where else ""))
+        if f.fix:
+            print(f"        fix: {f.fix}")
+    # Save into Builder's personal store (local memory) unless told not to — the hub side mirrors via the connector.
+    if not args.no_save:
+        saved = 0
+        for f in findings:
+            try:
+                if db.conn.execute("SELECT 1 FROM findings WHERE claim = ? LIMIT 1", (f.issue,)).fetchone():
+                    continue
+                db.add_review_finding(f.issue, f.severity, f.fix, topic=(Path(path).name or "security")[:80])
+                saved += 1
+            except Exception:  # noqa: BLE001
+                pass
+        if saved:
+            err(f"\n(remembered {saved} new finding(s) in my local store)")
+    return 1  # non-zero so this can gate a pre-commit hook or CI
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -419,7 +499,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {f}", file=sys.stderr)
             return 0 if r["ok"] else 1
         elif cmd == "build":
-            return _cmd_build(args, config, llm)
+            return _cmd_build(args, config, llm, memory)
+        elif cmd == "review":
+            return _cmd_review(args, config, db, memory, llm)
         elif cmd == "glossary":
             _print_rows(db.glossary(" ".join(args.term)), ["term", "domain", "definition"], 100)
         elif cmd == "feedback":

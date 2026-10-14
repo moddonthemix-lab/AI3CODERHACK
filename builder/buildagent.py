@@ -43,20 +43,24 @@ def files_from_reply(text: str) -> tuple[str, dict[str, str]]:
     return summary, files
 
 
-def make_propose(generate, task: str, log=print):
+def make_propose(generate, task: str, log=print, memory_note: str = ""):
     """Build a ``propose(ctx)`` for ``build_and_test`` from a ``generate(prompt) -> text`` function.
 
     ``generate`` is anything that answers a prompt (the local Ollama coder model, or the family brain).
     The first call writes the project; later calls carry the failing test output so the model can fix it.
+    ``memory_note`` (what Builder remembers — the boss's stack, past fixes, lessons) is included so his
+    work benefits from memory even offline.
     """
+    note = (f"\n\nWhat you remember (apply it):\n{memory_note}\n" if memory_note else "")
+
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
-            prompt = (f"Task: {task}\n\nYour code's tests are FAILING. Here is the output:\n\n"
+            prompt = (f"Task: {task}{note}\n\nYour code's tests are FAILING. Here is the output:\n\n"
                       f"{ctx['failure'][:6000]}\n\nFix the code (and tests if wrong) and return the full files."
                       + FILE_CONTRACT)
             log(f"  asking the coder model to fix attempt {ctx['attempt'] - 1}'s failures…")
         else:
-            prompt = f"Task: {task}" + FILE_CONTRACT
+            prompt = f"Task: {task}{note}" + FILE_CONTRACT
             log("  asking the coder model to write the project…")
         summary, files = files_from_reply(generate(prompt))
         if summary:
