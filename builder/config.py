@@ -45,6 +45,12 @@ def _default_home() -> Path:
     return Path(_env("SCHOLAR_HOME", str(Path.home() / ".scholar"))).expanduser()
 
 
+def _code_dirs() -> list[str]:
+    """The folders Builder is allowed to touch, as absolute paths. Empty by default — the boss opts in."""
+    raw = _env("BUILDER_CODE_DIRS", "")
+    return [str(Path(p.strip()).expanduser()) for p in raw.split(",") if p.strip()]
+
+
 @dataclass
 class Config:
     home: Path = field(default_factory=_default_home)
@@ -91,6 +97,12 @@ class Config:
     api_host: str = field(default_factory=lambda: _env("SCHOLAR_API_HOST", "127.0.0.1"))
     api_port: int = field(default_factory=lambda: int(_env("SCHOLAR_API_PORT", "8766")))
     api_token: str = field(default_factory=lambda: _env("SCHOLAR_API_TOKEN"))
+    # --- Builder: coding & security scope (enforced by the sandbox and the security gates) ---
+    # The ONLY folders Builder may read or write. Comma-separated; empty means "nothing until the boss sets it".
+    # e.g. BUILDER_CODE_DIRS="~/Projects,~/code".  Never the whole disk, never system files.
+    code_dirs: list[str] = field(default_factory=lambda: _code_dirs())
+    # Authorized-lab mode is OFF unless the boss turns it on for a session AND confirms the target (Part 5).
+    lab_mode: bool = field(default_factory=lambda: _env("BUILDER_LAB_MODE", "0").lower() in ("1", "true", "yes"))
 
     @property
     def db_path(self) -> Path:

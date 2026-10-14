@@ -4,7 +4,7 @@ from family_brain import Thought
 from hub_client import HubClientError, HubOffline
 from builder import connector as C
 from builder.config import Config
-from builder.connector import ScholarConnector, split_findings
+from builder.connector import BuilderConnector, split_review
 from builder.db import Store
 from builder.memory import ResearchMemory
 
@@ -26,7 +26,7 @@ class FakeHub:
 
     def me(self):
         self._maybe_raise("me")
-        return {"member": {"id": "scholar", "name": "Scholar"}, "channels": ["discoveries", "business"], "unread": 0}
+        return {"member": {"id": "builder", "name": "Builder"}, "channels": ["technical-help"], "unread": 0}
 
     def memories(self):
         return []
@@ -91,50 +91,56 @@ def db():
 def make(hub, thought, db, tmp_path):
     cfg = Config(home=tmp_path)
     cfg.ensure_home()
-    return ScholarConnector(hub, ScriptBrain(thought), db, ResearchMemory(db, None, cfg), cfg, log=lambda m: None)
+    return BuilderConnector(hub, ScriptBrain(thought), db, ResearchMemory(db, None, cfg), cfg, log=lambda m: None)
 
 
-def test_split_findings():
-    answer, f = split_findings('The market is ~$10B [S1].\nFINDINGS_JSON: '
-                               '[{"claim":"Market is $10B","status":"verified","confidence":0.8},'
-                               '{"claim":"x","status":"nonsense","confidence":5}]')
-    assert answer == "The market is ~$10B [S1]."
-    assert f == [{"claim": "Market is $10B", "status": "verified", "confidence": 0.8},
-                 {"claim": "x", "status": "reported", "confidence": 1.0}]  # bad status/confidence repaired
-    assert split_findings("just prose") == ("just prose", [])
+def test_split_review():
+    answer, r = split_review('Wrote a login form and tested it.\nREVIEW_JSON: '
+                             '[{"issue":"Password stored in plaintext","severity":"high","fix":"Hash with bcrypt"},'
+                             '{"issue":"Debug mode on","severity":"nonsense"}]')
+    assert answer == "Wrote a login form and tested it."
+    assert r == [{"issue": "Password stored in plaintext", "severity": "high", "fix": "Hash with bcrypt"},
+                 {"issue": "Debug mode on", "severity": "med", "fix": ""}]  # bad severity repaired, fix optional
+    assert split_review("just prose") == ("just prose", [])
 
 
-def test_research_task_posts_result_and_mirrors_findings_to_both(db, tmp_path):
+def test_build_task_posts_result_and_mirrors_reviews_to_both(db, tmp_path):
     hub = FakeHub()
-    thought = Thought(text='Studios use external SSDs then cloud.\nFINDINGS_JSON: '
-                           '[{"claim":"Most studios back up to external SSDs","status":"reported","confidence":0.6}]',
-                      brain="local", sources=["https://www.sweetwater.com/x"])
+    thought = Thought(text='Built a small Flask login app; its tests pass.\nREVIEW_JSON: '
+                           '[{"issue":"Secret key hardcoded in app.py","severity":"high","fix":"Load it from an env var"}]',
+                      brain="local", sources=[])
     conn = make(hub, thought, db, tmp_path)
-    conn.work_on_task({"id": 7, "status": "open", "title": "studio backup market", "channel": "tasks",
-                       "details": "How do small studios back up sessions?"}, {"local_only": False})
+    conn.work_on_task({"id": 7, "status": "open", "title": "login app", "channel": "technical-help",
+                       "details": "Build a tiny login page"}, {"local_only": False})
 
-    assert conn.brain.calls[0]["job"] == "research" and conn.brain.calls[0]["local_only"] is False
+    assert conn.brain.calls[0]["job"] == "code" and conn.brain.calls[0]["local_only"] is False  # coding -> Sonnet/local
     assert [u["status"] for u in hub.updates] == ["in_progress"]
-    assert hub.results[0]["task"] == 7 and "external SSDs" in hub.results[0]["summary"]
-    assert "FINDINGS_JSON" not in hub.results[0]["summary"]           # the machine block is stripped
-    assert hub.results[0]["artifacts"] == ["https://www.sweetwater.com/x"]
-    # posted to the hub...
-    assert hub.findings[0]["channel"] == "business" and hub.findings[0]["status"] == "reported"
-    assert hub.findings[0]["sources"] == ["https://www.sweetwater.com/x"]
-    # ...AND mirrored into Scholar's own library, with the source saved too
+    assert hub.results[0]["task"] == 7 and "Flask login" in hub.results[0]["summary"]
+    assert "REVIEW_JSON" not in hub.results[0]["summary"]              # the machine block is stripped
+    assert hub.results[0]["channel"] == "technical-help"
+    # the security issue is posted to the hub (severity in the status field)...
+    assert hub.findings[0]["channel"] == "technical-help" and hub.findings[0]["status"] == "high"
+    # ...AND mirrored into Builder's own store with severity + fix
     local = db.findings()
-    assert local and local[0]["claim"] == "Most studios back up to external SSDs"
-    assert db.get_source(local[0]["source_ids"][0])["domain"] == "sweetwater.com"
+    assert local and local[0]["claim"] == "Secret key hardcoded in app.py"
+    assert local[0]["severity"] == "high" and "env var" in local[0]["fix"]
 
 
-def test_local_only_task_is_passed_through(db, tmp_path):
+def test_big_approved_build_uses_opus(db, tmp_path):
     hub = FakeHub()
-    conn = make(hub, Thought(text="answer\nFINDINGS_JSON: []", brain="local"), db, tmp_path)
-    conn.work_on_task({"id": 1, "status": "open", "title": "q", "details": "d"}, {"local_only": True})
-    assert conn.brain.calls[0]["local_only"] is True
+    conn = make(hub, Thought(text="done\nREVIEW_JSON: []", brain="cloud"), db, tmp_path)
+    conn.work_on_task({"id": 1, "status": "open", "title": "big rewrite", "details": "d", "priority": "big"}, None)
+    assert conn.brain.calls[0]["job"] == "big"                        # boss-flagged big build -> Opus
 
 
-def test_research_waits_when_no_internet_or_budget(db, tmp_path):
+def test_baby_room_is_forced_local_only(db, tmp_path):
+    hub = FakeHub()
+    conn = make(hub, Thought(text="here you go\nREVIEW_JSON: []", brain="local"), db, tmp_path)
+    conn.work_on_task({"id": 1, "status": "open", "title": "q", "details": "d", "channel": "builder+baby"}, None)
+    assert conn.brain.calls[0]["local_only"] is True                  # builder+baby never touches the cloud
+
+
+def test_task_that_needs_the_web_still_parks(db, tmp_path):
     hub = FakeHub()
     conn = make(hub, Thought(brain="wait", reason="no internet"), db, tmp_path)
     conn.work_on_task({"id": 3, "status": "open", "title": "t", "details": "d"}, None)
@@ -158,32 +164,41 @@ def test_already_handled_task_is_left_alone(db, tmp_path):
 
 
 def test_answers_a_question_but_not_an_ordinary_post(db, tmp_path):
-    hub = FakeHub(threads={5: {"id": 5, "type": "question", "channel": "general", "text": "How do studios back up?"}})
-    conn = make(hub, Thought(text="On local drives, then cloud.", brain="local"), db, tmp_path)
+    hub = FakeHub(threads={5: {"id": 5, "type": "question", "channel": "technical-help", "text": "How do I hash a password?"}})
+    conn = make(hub, Thought(text="Use bcrypt or argon2.", brain="local"), db, tmp_path)
     conn.answer({"id": 5, "local_only": False})
-    assert hub.posts[0]["channel"] == "general" and hub.posts[0]["reply_to"] == 5
+    assert hub.posts[0]["channel"] == "technical-help" and hub.posts[0]["reply_to"] == 5
     # a non-question root (someone's finding) gets no chatter back
-    hub2 = FakeHub(threads={6: {"id": 6, "type": "finding", "channel": "discoveries", "text": "x"}})
+    hub2 = FakeHub(threads={6: {"id": 6, "type": "finding", "channel": "technical-help", "text": "x"}})
     conn2 = make(hub2, Thought(text="y", brain="local"), db, tmp_path)
     conn2.answer({"id": 6})
     assert hub2.posts == []
 
 
-def test_findings_route_to_discoveries_vs_business(db, tmp_path):
+def test_baby_question_is_answered_locally(db, tmp_path):
+    hub = FakeHub(threads={5: {"id": 5, "type": "question", "channel": "builder+baby", "text": "what is a loop?"}})
+    conn = make(hub, Thought(text="A loop repeats steps.", brain="local"), db, tmp_path)
+    conn.answer({"id": 5})
+    assert conn.brain.calls[0]["local_only"] is True                  # mentoring Baby stays on the local model
+
+
+def test_reviews_post_to_the_security_or_technical_channel(db, tmp_path):
     conn = make(FakeHub(), Thought(brain="local"), db, tmp_path)
-    conn.publish_findings([{"claim": "c", "status": "reported", "confidence": 0.5}], [], "quantum tunnelling", False)
-    conn.publish_findings([{"claim": "c2", "status": "reported", "confidence": 0.5}], [], "resale profit margins", False)
-    assert conn.hub.findings[0]["channel"] == "discoveries" and conn.hub.findings[1]["channel"] == "business"
+    conn.publish_reviews([{"issue": "SQL built with string concatenation", "severity": "high",
+                           "fix": "Use parameterised queries"}], [], "db layer", False)
+    assert conn.hub.findings[0]["channel"] == "technical-help" and conn.hub.findings[0]["status"] == "high"
 
 
-def test_self_initiated_research_waits_for_the_boss(db, tmp_path, monkeypatch):
+def test_self_initiated_build_waits_for_the_boss(db, tmp_path, monkeypatch):
     monkeypatch.setattr(C, "PROPOSE_HOURS", 24)
-    hub = FakeHub(interests=["sneaker reselling margins", "local AI on a Raspberry Pi"])
+    hub = FakeHub(interests=["a habit-tracker app", "a Raspberry Pi status screen"])
     conn = make(hub, Thought(brain="local"), db, tmp_path)
     conn.maybe_propose()
-    assert len(hub.requests) == 1 and hub.requests[0]["assignee"] == "scholar"
-    assert hub.requests[0]["parent_task"] is None            # no parent -> the hub holds it as 'proposed'
-    conn.maybe_propose()                                     # within the window: no second proposal
+    assert len(hub.requests) == 1 and hub.requests[0]["assignee"] == "builder"
+    assert hub.requests[0]["channel"] == "technical-help"
+    assert hub.requests[0]["title"].startswith("Build:")
+    assert hub.requests[0]["parent_task"] is None                     # no parent -> the hub holds it as 'proposed'
+    conn.maybe_propose()                                              # within the window: no second proposal
     assert len(hub.requests) == 1
 
 
@@ -191,10 +206,10 @@ def test_hub_errors_never_crash_the_connector(db, tmp_path, monkeypatch):
     monkeypatch.setattr(C.time, "sleep", lambda s: None)
     hub = FakeHub()
     hub.raise_on["post_finding"] = HubClientError(423, "thread paused")   # 423
-    conn = make(hub, Thought(text="a\nFINDINGS_JSON: [{\"claim\":\"c\",\"status\":\"reported\",\"confidence\":0.5}]",
+    conn = make(hub, Thought(text='a\nREVIEW_JSON: [{"issue":"i","severity":"low","fix":"f"}]',
                              brain="local"), db, tmp_path)
     conn.work_on_task({"id": 1, "status": "open", "title": "t", "details": "d"}, None)  # must not raise
-    assert hub.results and hub.findings == []                # result posted; finding rejected but handled
+    assert hub.results and hub.findings == []                # result posted; review finding rejected but handled
     conn.on_hub_error(HubClientError(429, "slow down"))      # 429 path (sleep patched)
     conn.on_hub_error(HubClientError(403, "paused"))         # 403 path
 

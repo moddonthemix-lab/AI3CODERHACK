@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS findings (
     topic       TEXT NOT NULL DEFAULT 'general',
     source_ids  TEXT NOT NULL DEFAULT '[]',      -- JSON list of sources.id
     notes       TEXT NOT NULL DEFAULT '',
+    severity    TEXT,                            -- security reviews: high | med | low (NULL for research findings)
+    fix         TEXT,                            -- security reviews: the recommended fix (NULL for research findings)
     investigation_id INTEGER,
     checks      TEXT NOT NULL DEFAULT '[]',      -- JSON list of skeptic flags (outdated, single-source, ...)
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -233,6 +235,10 @@ CREATE TABLE IF NOT EXISTS reports (
 
 # How sure Scholar is allowed to sound. Assigned by code from the evidence, not by the model.
 STATUSES = ("verified", "reported", "assumption", "disputed", "refuted")
+# Security-review severity (defensive audits). Assigned by code from the model's labelled output, repaired to "med".
+SEVERITIES = ("high", "med", "low")
+# A severity maps to a confidence number so the hub's finding display still means something.
+SEVERITY_CONFIDENCE = {"high": 0.9, "med": 0.6, "low": 0.3}
 LESSON_KINDS = ("preference", "correction", "strategy", "source_note")
 
 
@@ -265,6 +271,16 @@ class Store:
             # Readers (the dashboard) and a writer (background research) can work at the same time.
             self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Small, additive schema upgrades for databases created before a column existed."""
+        have = {r["name"] for r in self.conn.execute("PRAGMA table_info(findings)")}
+        with self.conn:
+            if "severity" not in have:
+                self.conn.execute("ALTER TABLE findings ADD COLUMN severity TEXT")
+            if "fix" not in have:
+                self.conn.execute("ALTER TABLE findings ADD COLUMN fix TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -324,17 +340,31 @@ class Store:
     # ---------------------------------------------------------------- findings
     def add_finding(self, claim: str, status: str = "assumption", confidence: float = 0.5,
                     topic: str = "general", source_ids: list[int] | None = None,
-                    notes: str = "", investigation_id: int | None = None) -> int:
+                    notes: str = "", investigation_id: int | None = None,
+                    severity: str | None = None, fix: str | None = None) -> int:
         if status not in STATUSES:
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         fid = self._insert(
-            """INSERT INTO findings(claim, status, confidence, topic, source_ids, notes, investigation_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO findings(claim, status, confidence, topic, source_ids, notes, investigation_id,
+                                    severity, fix)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (claim, status, _clamp(confidence), topic, json.dumps(sorted(set(source_ids or []))), notes,
-             investigation_id),
+             investigation_id, severity, fix),
         )
         self._history(fid, status, _clamp(confidence), "first recorded")
         return fid
+
+    def add_review_finding(self, issue: str, severity: str = "med", fix: str = "",
+                           topic: str = "security", source_ids: list[int] | None = None) -> int:
+        """Record a defensive security-review finding (issue + severity + recommended fix).
+
+        Stored in the same ``findings`` table as research findings, but with ``severity``/``fix`` set and a
+        neutral ``status`` of 'reported'. ``confidence`` reflects the severity so the hub's display is meaningful.
+        """
+        severity = severity if severity in SEVERITIES else "med"
+        return self.add_finding(issue, status="reported", confidence=SEVERITY_CONFIDENCE[severity],
+                                topic=topic, source_ids=source_ids, notes="security review",
+                                severity=severity, fix=fix)
 
     def update_finding(self, finding_id: int, status: str | None = None,
                        confidence: float | None = None, add_source_ids: list[int] | None = None,
