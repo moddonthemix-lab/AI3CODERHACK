@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS reviews (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+-- Build memory: what Builder has built, whether it passed, and the problem he had to solve — so he gets
+-- better at building and at security over time by remembering past projects and fixes.
+CREATE TABLE IF NOT EXISTS builds (
+    id          INTEGER PRIMARY KEY,
+    task        TEXT NOT NULL,
+    dir         TEXT NOT NULL DEFAULT '',
+    ok          INTEGER NOT NULL DEFAULT 0,     -- 1 = tests passed
+    attempts    INTEGER NOT NULL DEFAULT 1,
+    problem     TEXT NOT NULL DEFAULT '',       -- the error he hit (and solved, if ok) — a short signature
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
 -- Learning from experience: the boss's feedback and preferences.
 CREATE TABLE IF NOT EXISTS lessons (
     id          INTEGER PRIMARY KEY,
@@ -163,6 +175,18 @@ class Store:
         sql += " ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'med' THEN 1 ELSE 2 END, id DESC LIMIT ?"
         params.append(limit)
         return _rows(self.conn.execute(sql, params))
+
+    # ------------------------------------------------------------------ build memory
+    def add_build(self, task: str, dir: str = "", ok: bool = False, attempts: int = 1, problem: str = "") -> int:
+        return self._insert("INSERT INTO builds(task, dir, ok, attempts, problem) VALUES (?, ?, ?, ?, ?)",
+                            (task, dir, 1 if ok else 0, attempts, problem[:500]))
+
+    def builds(self, query: str = "", limit: int = 20) -> list[dict]:
+        if query.strip():
+            return _rows(self.conn.execute(
+                "SELECT * FROM builds WHERE task LIKE ? OR problem LIKE ? ORDER BY id DESC LIMIT ?",
+                (_like(query), _like(query), limit)))
+        return _rows(self.conn.execute("SELECT * FROM builds ORDER BY id DESC LIMIT ?", (limit,)))
 
     # ------------------------------------------------------------------ lessons
     def add_lesson(self, text: str, kind: str = "preference", topic: str = "general",

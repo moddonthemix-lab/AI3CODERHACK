@@ -202,6 +202,31 @@ def test_end_to_end_write_fail_fix_pass_with_real_tests(tmp_path):
     result = build_and_test(proj, propose, max_tries=3, log=lambda m: None)   # real sandbox.run_tests
     assert result["ok"] is True and result["attempts"] == 2
     assert "def add(a, b):\n    return a + b" in (proj.root / "app.py").read_text()
+    # the loop reports the problems it had to solve along the way
+    assert result["failures"] and "AssertionError" in "\n".join(result["failures"])
+
+
+def test_problem_signature_pulls_out_the_error():
+    from builder.projects import problem_signature
+    assert problem_signature(["Traceback...\nModuleNotFoundError: No module named 'flask'\n"]) \
+        .startswith("ModuleNotFoundError")
+    assert "AssertionError" in problem_signature(["E   AssertionError: 2 != 3"])
+    assert problem_signature([]) == ""
+
+
+def test_build_memory_is_recorded_and_recalled(tmp_path):
+    from builder.db import Store
+    from builder.memory import Memory
+    db = Store()
+    mem = Memory(db, None, Config(home=tmp_path, code_dirs=[str(tmp_path)]))
+    mem.remember_build("a flask login app", str(tmp_path), ok=False, attempts=3,
+                       problem="ModuleNotFoundError: No module named 'flask'")
+    mem.remember_build("a tip calculator", str(tmp_path), ok=True, attempts=1)
+
+    recalled = mem.recall("flask login")
+    assert any("flask login" in b["task"] for b in recalled["builds"])
+    note = mem.as_prompt(recalled)
+    assert "Projects you've built before" in note and "ModuleNotFoundError" in note
 
 
 def _json_files(files: dict) -> str:

@@ -24,8 +24,11 @@ family's cloud brain when configured, but never needs it.
 
 Scholar's research engine has been fully removed — there is no `research.py`, `calc.py`, `documents.py`,
 `credibility.py`, `web.py`, `tools.py` or `vectors.py`. The store (`db.py`) holds only Builder's tables
-(memories, reviews, lessons, lab authorizations, safety log, pending, inbox); security findings live in
-their own `reviews` table, separate from anything else.
+(memories, reviews, builds, lessons, lab authorizations, safety log, pending, inbox); security findings
+live in their own `reviews` table, separate from anything else. Builder also has **build memory**: each
+`builder build` records the project, whether its tests passed, how many tries it took, and the problem he
+had to solve (`builds` table) — and `memory.recall` feeds relevant past builds and problems back into the
+next build's prompt, so he learns from his own projects.
 
 ## Conventions
 

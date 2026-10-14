@@ -161,17 +161,30 @@ def build_and_test(project: Project, propose, test_cmd=None, run=None, max_tries
     """
     from . import sandbox
     run = run or sandbox.run_tests
-    result = {"ok": False, "attempts": 0, "test": None, "diff": ""}
-    failure = None
+    result = {"ok": False, "attempts": 0, "test": None, "diff": "", "failures": []}
+    failure, failures = None, []
     for attempt in range(1, max_tries + 1):
         files = propose({"attempt": attempt, "failure": failure, "diff": project.diff()})
         if files:
             project.write_all(files)
         test = run(project.root, test_cmd)
-        result = {"ok": bool(test.get("ok")), "attempts": attempt, "test": test, "diff": project.diff()}
+        result = {"ok": bool(test.get("ok")), "attempts": attempt, "test": test,
+                  "diff": project.diff(), "failures": failures}
         if result["ok"]:
             log(f"  tests pass on attempt {attempt}.")
             return result
         failure = (test.get("stderr") or "") + "\n" + (test.get("stdout") or "")
+        failures.append(failure.strip())
         log(f"  tests failed on attempt {attempt}; reading the error and trying a fix…")
     return result
+
+
+def problem_signature(failures: list[str]) -> str:
+    """A short, memorable summary of the first real error hit during a build (its exception/message line)."""
+    import re
+    for text in failures:
+        for line in text.splitlines():
+            m = re.search(r"\b([A-Za-z_]+(?:Error|Exception|Warning)|FAILED|AssertionError)\b.*", line)
+            if m:
+                return m.group(0).strip()[:200]
+    return (failures[0].strip().splitlines()[0][:200] if failures and failures[0].strip() else "")

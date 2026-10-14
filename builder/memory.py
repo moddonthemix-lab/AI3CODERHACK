@@ -37,6 +37,10 @@ class Memory:
             return None
         return self.db.add_review(issue, severity, fix, topic)
 
+    def remember_build(self, task: str, dir: str, ok: bool, attempts: int, problem: str = "") -> int:
+        """Record a finished build (and the problem it had to solve) so Builder learns from his projects."""
+        return self.db.add_build(task, dir, ok, attempts, problem)
+
     # ------------------------------------------------------------------ recall
     def recall(self, task: str, limit: int = 6) -> dict:
         """Everything relevant to ``task``: standing preferences, matching lessons, and past findings."""
@@ -47,7 +51,8 @@ class Memory:
             if l["id"] not in seen:
                 seen.add(l["id"])
                 lessons.append({"id": l["id"], "kind": l["kind"], "text": l["text"]})
-        return {"lessons": lessons[:limit + 4], "reviews": self.db.reviews(task, limit=limit)}
+        return {"lessons": lessons[:limit + 4], "reviews": self.db.reviews(task, limit=limit),
+                "builds": self.db.builds(task, limit=4)}
 
     @staticmethod
     def as_prompt(mem: dict, max_chars: int = 2000) -> str:
@@ -59,6 +64,12 @@ class Memory:
             parts.append("Security issues you've found before (and the fixes):\n" + "\n".join(
                 f"- [{r['severity']}] {r['issue']}" + (f" → {r['fix']}" if r.get("fix") else "")
                 for r in mem["reviews"]))
+        if mem.get("builds"):
+            parts.append("Projects you've built before (learn from them):\n" + "\n".join(
+                f"- {b['task']}" + (f" — passed in {b['attempts']} tr{'y' if b['attempts'] == 1 else 'ies'}"
+                                    if b["ok"] else " — did NOT pass")
+                + (f"; problem you hit: {b['problem']}" if b.get("problem") else "")
+                for b in mem["builds"]))
         return "\n\n".join(parts)[:max_chars]
 
 

@@ -84,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("query", nargs="*")
     s.add_argument("--severity", choices=["high", "med", "low"])
 
+    s = sub.add_parser("builds", help="Projects Builder has built and the problems he solved")
+    s.add_argument("query", nargs="*")
+
     sub.add_parser("chat", help="Talk to Builder in the terminal")
     v = sub.add_parser("voice", help="Talk to Builder out loud (press Enter, then speak)")
     v.add_argument("--hands-free", action="store_true", help="listen continuously, no Enter needed")
@@ -175,7 +178,8 @@ def voice_loop(assistant: Assistant, config: Config, hands_free: bool) -> None:
 def _cmd_build(args, config, llm, memory=None) -> int:
     """`builder build`: write a small project, run its tests, fix failures, show the diff. All inside scope."""
     from .buildagent import make_propose
-    from .projects import Project, ScopeError, build_and_test, restore_backup, save_backup
+    from .projects import (Project, ScopeError, build_and_test, problem_signature,
+                           restore_backup, save_backup)
 
     backup_path = config.home / "backups" / "last_build.json"
     err = lambda m: print(m, file=sys.stderr)  # noqa: E731
@@ -222,6 +226,14 @@ def _cmd_build(args, config, llm, memory=None) -> int:
     propose = make_propose(generate, task, log=err, memory_note=memory_note)
     result = build_and_test(proj, propose, test_cmd=test_cmd, max_tries=args.tries, log=err)
     save_backup(proj, backup_path)
+
+    # Remember this build — and the problem he hit — so he learns from his projects over time.
+    if memory is not None:
+        try:
+            problem = problem_signature(result.get("failures", []))
+            memory.remember_build(task, str(proj.root), result["ok"], result["attempts"], problem)
+        except Exception:  # noqa: BLE001 — recording must never fail a build
+            pass
 
     print(result["diff"] or "(no changes written)")
     t = result["test"] or {}
@@ -413,6 +425,9 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "reviews":
             _print_rows(db.reviews(" ".join(args.query), args.severity, 50),
                         ["id", "severity", "topic", "issue", "fix"], 60)
+        elif cmd == "builds":
+            rows = [{**b, "ok": "✓" if b["ok"] else "✗"} for b in db.builds(" ".join(args.query), 50)]
+            _print_rows(rows, ["id", "ok", "attempts", "created_at", "task", "problem"], 50)
         elif cmd == "feedback":
             print(f"lesson #{memory.learn(' '.join(args.text), args.kind)} — Builder will apply it from now on")
         elif cmd == "lessons":
