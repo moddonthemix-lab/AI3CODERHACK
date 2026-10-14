@@ -20,12 +20,14 @@ def _env(name: str, default: str = "") -> str:
 #   cpu  — Intel Macs and other machines without a usable GPU (the default)
 #   pi   — Raspberry Pi 5 (8-16GB): small models, short reads; or point SCHOLAR_OLLAMA_URL at a bigger machine
 #   gpu  — Apple Silicon with 32GB+ or a desktop GPU: bigger models, longer reads
+# Builder is a CODER, so his models are the Qwen2.5-Coder family (code + config + security reasoning),
+# not Scholar's general research models. `model` is the thinker (planning, review, security audits) and
+# `fast_model` is the reader (quick edits, explanations). Confirm the best fit for your Mac with `builder bench`.
+# A good coding reader on a 16GB CPU Mac is qwen2.5-coder:7b (BUILDER_SPEC §2).
 PROFILES = {
-    # Note: plain "qwen3:4b" is now Qwen's *Thinking* edition, which reasons out loud even when told not to —
-    # minutes per chat reply on a CPU. The Instruct edition answers directly.
-    "cpu": {"model": "qwen3:8b", "fast_model": "qwen3:4b-instruct", "num_ctx": 8192, "read_chars": 6000, "whisper": "base.en"},
-    "pi":  {"model": "qwen3:4b-instruct", "fast_model": "qwen3:1.7b", "num_ctx": 4096, "read_chars": 3500, "whisper": "tiny.en"},
-    "gpu": {"model": "qwen3:14b", "fast_model": "qwen3:8b", "num_ctx": 16384, "read_chars": 10000, "whisper": "small.en"},
+    "cpu": {"model": "qwen2.5-coder:7b", "fast_model": "qwen2.5-coder:3b", "num_ctx": 8192, "read_chars": 6000, "whisper": "base.en"},
+    "pi":  {"model": "qwen2.5-coder:3b", "fast_model": "qwen2.5-coder:1.5b", "num_ctx": 4096, "read_chars": 3500, "whisper": "tiny.en"},
+    "gpu": {"model": "qwen2.5-coder:14b", "fast_model": "qwen2.5-coder:7b", "num_ctx": 16384, "read_chars": 10000, "whisper": "small.en"},
 }
 
 

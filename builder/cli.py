@@ -106,6 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("script", nargs="?", help="a .py file (or use --code)")
     s.add_argument("--code")
     s.add_argument("--table", type=int, action="append", default=[], help="table id, copied in as T<id>.csv")
+    s = sub.add_parser("build", help="Build a small project: write it, run its tests, fix failures, show the diff")
+    s.add_argument("task", nargs="*", help="what to build, e.g. \"a tip calculator with tests\"")
+    s.add_argument("--dir", required=True, help="project folder (must be inside BUILDER_CODE_DIRS)")
+    s.add_argument("--test", help="test command, e.g. \"pytest -q\" (auto-detected if omitted)")
+    s.add_argument("--tries", type=int, default=3, help="how many fix-and-retry rounds (default 3)")
+    s.add_argument("--undo", action="store_true", help="undo Builder's last build in --dir and exit")
     s = sub.add_parser("glossary", help="Terms Scholar has learned")
     s.add_argument("term", nargs="*")
     s = sub.add_parser("feedback", help="Teach Scholar: a preference, correction, strategy or note about a source")
@@ -215,6 +221,65 @@ def voice_loop(assistant: Assistant, config: Config, hands_free: bool) -> None:
 
 def _progress(msg: str) -> None:
     print(f"  · {msg}", file=sys.stderr, flush=True)
+
+
+_BUILD_SYSTEM = (
+    "You are Builder, a careful, skilled coder. You write small, correct, self-contained projects and the "
+    "tests that prove they work. You explain briefly, then give the complete files. You never touch the "
+    "network or files outside the project. If something is unsafe or unclear, you say so instead of guessing."
+)
+
+
+def _cmd_build(args, config, llm) -> int:
+    """`builder build`: write a small project, run its tests, fix failures, show the diff. All inside scope."""
+    from .buildagent import make_propose
+    from .projects import Project, ScopeError, build_and_test, restore_backup, save_backup
+
+    backup_path = config.home / "backups" / "last_build.json"
+    err = lambda m: print(m, file=sys.stderr)
+
+    if args.undo:
+        try:
+            restored = restore_backup(backup_path, config)
+        except FileNotFoundError:
+            err("Nothing to undo — no saved build found.")
+            return 1
+        except ScopeError as e:
+            err(f"✗ {e}")
+            return 1
+        print(f"Undone. Restored {len(restored)} file(s): {', '.join(restored) or '(none)'}")
+        return 0
+
+    task = " ".join(args.task).strip()
+    if not task:
+        err('Tell me what to build, e.g. builder build "a tip calculator with tests" --dir ~/Projects/tip')
+        return 1
+    try:
+        proj = Project(args.dir, config)
+    except ScopeError as e:
+        err(f"✗ {e}\n  Set BUILDER_CODE_DIRS to the folders Builder may touch (e.g. ~/Projects).")
+        return 1
+    if not llm.available():
+        err("✗ The local coder model isn't reachable. Is Ollama running? (try: builder bench)")
+        return 1
+
+    def generate(prompt: str) -> str:
+        return llm.chat([{"role": "system", "content": _BUILD_SYSTEM},
+                         {"role": "user", "content": prompt}]).get("content", "")
+
+    test_cmd = args.test.split() if args.test else None
+    propose = make_propose(generate, task, log=err)
+    result = build_and_test(proj, propose, test_cmd=test_cmd, max_tries=args.tries, log=err)
+    save_backup(proj, backup_path)
+
+    print(result["diff"] or "(no changes written)")
+    t = result["test"] or {}
+    err(f"\n{'✓ tests pass' if result['ok'] else '✗ tests still failing'} "
+        f"after {result['attempts']} attempt(s) in {proj.root}")
+    if not result["ok"] and (t.get("stderr") or t.get("stdout")):
+        err((t.get("stderr") or t.get("stdout"))[-1500:])
+    err(f"Undo with:  builder build --undo --dir {args.dir}")
+    return 0 if result["ok"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -353,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             for f in r["files"]:
                 print(f"  {f}", file=sys.stderr)
             return 0 if r["ok"] else 1
+        elif cmd == "build":
+            return _cmd_build(args, config, llm)
         elif cmd == "glossary":
             _print_rows(db.glossary(" ".join(args.term)), ["term", "domain", "definition"], 100)
         elif cmd == "feedback":
