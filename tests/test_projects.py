@@ -90,6 +90,22 @@ def test_run_tests_detects_and_reports_pass_then_fail(tmp_path):
     assert bad["ok"] is False and "assert" in (bad["stdout"] + bad["stderr"]).lower()
 
 
+def test_builds_work_without_pytest_installed(tmp_path, monkeypatch):
+    # Simulate a machine where pytest isn't installed — the built-in runner must take over.
+    monkeypatch.setattr(sandbox, "_PYTEST_OK", False)
+    proj_dir = tmp_path / "Projects" / "calc"
+    proj_dir.mkdir(parents=True)
+    (proj_dir / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    (proj_dir / "test_app.py").write_text("from app import add\ndef test_add():\n    assert add(2, 3) == 5\n",
+                                          encoding="utf-8")
+    good = sandbox.run_tests(proj_dir, allow_network=True)
+    assert good["ok"] is True and "passed" in good["stdout"]
+
+    (proj_dir / "app.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")  # now wrong
+    bad = sandbox.run_tests(proj_dir, allow_network=True)
+    assert bad["ok"] is False and "FAILED" in bad["stdout"]
+
+
 def test_run_tests_reports_when_no_tests_found(tmp_path):
     empty = tmp_path / "Projects" / "empty"
     empty.mkdir(parents=True)

@@ -170,6 +170,46 @@ def detect_test_command(project_dir: Path) -> list[str] | None:
     return None
 
 
+# A tiny, dependency-free test runner used when pytest isn't installed. It imports every test_*.py in the
+# project folder and runs each `test_*` function, so Builder's builds work out of the box without pytest.
+BUILTIN_RUNNER = r'''
+import importlib.util, os, sys, traceback
+sys.path.insert(0, os.getcwd())
+ran = failed = 0
+for fn in sorted(os.listdir(".")):
+    if not (fn.startswith("test_") and fn.endswith(".py")):
+        continue
+    spec = importlib.util.spec_from_file_location(fn[:-3], fn)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        print("ERROR importing", fn); traceback.print_exc(); failed += 1; continue
+    for name in sorted(dir(mod)):
+        obj = getattr(mod, name)
+        if name.startswith("test_") and callable(obj):
+            ran += 1
+            try:
+                obj(); print("PASS", fn + "::" + name)
+            except Exception:
+                print("FAILED", fn + "::" + name); traceback.print_exc(); failed += 1
+if ran == 0:
+    print("no tests ran"); sys.exit(5)
+print("%d passed, %d failed" % (ran - failed, failed))
+sys.exit(1 if failed else 0)
+'''
+
+_PYTEST_OK = None
+
+
+def _pytest_available() -> bool:
+    global _PYTEST_OK
+    if _PYTEST_OK is None:
+        import importlib.util
+        _PYTEST_OK = importlib.util.find_spec("pytest") is not None
+    return _PYTEST_OK
+
+
 def run_tests(project_dir: Path, cmd: list[str] | None = None, timeout: int = 180, mem_mb: int = 4096,
               allow_network: bool = False) -> dict:
     """Run a project's OWN test suite inside its folder and report pass/fail with the error output.
@@ -194,6 +234,16 @@ def run_tests(project_dir: Path, cmd: list[str] | None = None, timeout: int = 18
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(project_dir),
            "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1"}
 
+    # If the test command is pytest but pytest isn't installed, use the built-in dependency-free runner,
+    # so builds don't fail just because the user hasn't `pip install pytest`.
+    runner_tmp = None
+    if "pytest" in cmd and not _pytest_available():
+        import tempfile
+        fd, runner_tmp = tempfile.mkstemp(suffix="_builder_runner.py")
+        with os.fdopen(fd, "w") as f:
+            f.write(BUILTIN_RUNNER)
+        cmd = [sys.executable, runner_tmp]
+
     def _run(wrapper):
         full = [*wrapper, *cmd]
         try:
@@ -209,13 +259,20 @@ def run_tests(project_dir: Path, cmd: list[str] | None = None, timeout: int = 18
             return {"ok": False, "exit_code": None, "stdout": "",
                     "stderr": f"could not run the test command {cmd[0]!r}: {e}", "timed_out": True}
 
-    wrapper = [] if allow_network else _wrapper(project_dir)
-    r = _run(wrapper)
-    # If the isolation wrapper was used and the run failed WITHOUT the test runner actually producing any
-    # output (e.g. a broken/denied macOS sandbox-exec), re-run once unwrapped so a bad sandbox never masks
-    # working code. A real test failure prints a report and is left as-is.
-    if wrapper and not r["ok"] and not _looks_like_test_output(r["stdout"] + r["stderr"]):
-        r = _run([])
+    try:
+        wrapper = [] if allow_network else _wrapper(project_dir)
+        r = _run(wrapper)
+        # If the isolation wrapper was used and the run failed WITHOUT the test runner actually producing any
+        # output (e.g. a broken/denied macOS sandbox-exec), re-run once unwrapped so a bad sandbox never masks
+        # working code. A real test failure prints a report and is left as-is.
+        if wrapper and not r["ok"] and not _looks_like_test_output(r["stdout"] + r["stderr"]):
+            r = _run([])
+    finally:
+        if runner_tmp:
+            try:
+                os.unlink(runner_tmp)
+            except OSError:
+                pass
     return {"ok": r["ok"], "exit_code": r["exit_code"], "stdout": r["stdout"][-12000:],
             "stderr": r["stderr"][-6000:], "cmd": cmd, "timed_out": r["timed_out"]}
 
