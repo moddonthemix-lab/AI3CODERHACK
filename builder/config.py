@@ -102,6 +102,8 @@ class Config:
     # The thinker (planning, review, the security audit) and the reader (quick edits and explanations).
     model: str = field(default_factory=_p("model", "MODEL"))
     fast_model: str = field(default_factory=_p("fast_model", "FAST_MODEL"))
+    # When a build fails on the main model, retry once on this stronger one (slower but sharper). Empty = off.
+    fallback_model: str = field(default_factory=lambda: _env("FALLBACK_MODEL", "qwen2.5-coder:7b"))
     num_ctx: int = field(default_factory=_p_int("num_ctx", "NUM_CTX"))
     read_chars: int = field(default_factory=_p_int("read_chars", "READ_CHARS"))
     # Let the thinker reason step by step before answering — slower on a CPU, more accurate on judgement calls.

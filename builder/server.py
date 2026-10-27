@@ -262,8 +262,8 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                 # Build a small project and run its tests, inside scope, on the local coder model.
                 if assistant is None or cfg is None:
                     return self._send(503, {"error": "builder not configured for build"})
-                from .buildagent import make_propose
-                from .projects import Project, ScopeError, build_and_test
+                from .buildagent import run_build
+                from .projects import Project, ScopeError
                 try:
                     proj = Project(body["dir"], cfg)
                 except ScopeError as e:
@@ -271,18 +271,16 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                 blm = assistant.llm
                 if not blm.available():
                     return self._send(503, {"error": "local coder model not reachable (is Ollama running?)"})
-
-                def _gen(prompt):
-                    sysmsg = ("You are Builder, a careful coder. You write small, correct, self-contained "
-                              "projects and the tests that prove them, and never touch the network or files "
-                              "outside the project.")
-                    return blm.chat([{"role": "system", "content": sysmsg},
-                                     {"role": "user", "content": prompt}]).get("content", "")
-
+                fallback = None
+                if getattr(cfg, "fallback_model", "") and cfg.fallback_model != blm.model:
+                    from .llm import Ollama
+                    fallback = Ollama(cfg.ollama_url, cfg.fallback_model, cfg.llm_timeout, cfg.num_ctx,
+                                      one_at_a_time=cfg.one_model_at_a_time)
                 try:
                     with brain:
-                        result = build_and_test(proj, make_propose(_gen, body["task"], log=lambda m: None),
-                                                max_tries=int(body.get("tries", 3)))
+                        result = run_build(body["task"], proj, blm, memory=memory,
+                                           tries=int(body.get("tries", 3)), log=lambda m: None,
+                                           fallback_llm=fallback)
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
                 return self._send(200, {"from": CARD["id"], "ok": result["ok"], "attempts": result["attempts"],

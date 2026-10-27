@@ -30,12 +30,6 @@ def _print_rows(rows: list[dict], cols: list[str], width: int = 70) -> None:
         print("  ".join(cell(r, c).ljust(widths[c]) for c in cols))
 
 
-_BUILD_SYSTEM = (
-    "You are Builder, a careful, skilled coder. You write small, correct, self-contained projects and the "
-    "tests that prove they work. You explain briefly, then give the complete files. You never touch the "
-    "network or files outside the project. If something is unsafe or unclear, you say so instead of guessing."
-)
-
 _REVIEW_SYSTEM = (
     "You are Builder doing a DEFENSIVE security review of code the owner wrote and wants hardened. You point "
     "out real, specific weaknesses and give a concrete fix for each. You never explain how to attack anything "
@@ -181,9 +175,8 @@ def voice_loop(assistant: Assistant, config: Config, hands_free: bool) -> None:
 
 def _cmd_build(args, config, llm, memory=None) -> int:
     """`builder build`: write a small project, run its tests, fix failures, show the diff. All inside scope."""
-    from .buildagent import make_propose
-    from .projects import (Project, ScopeError, build_and_test, problem_signature,
-                           restore_backup, save_backup)
+    from .buildagent import run_build
+    from .projects import Project, ScopeError, restore_backup, save_backup
 
     backup_path = config.home / "backups" / "last_build.json"
     err = lambda m: print(m, file=sys.stderr)  # noqa: E731
@@ -213,37 +206,16 @@ def _cmd_build(args, config, llm, memory=None) -> int:
         err("✗ The local coder model isn't reachable. Is Ollama running? (try: builder bench)")
         return 1
 
-    def generate(prompt: str) -> str:
-        return llm.chat([{"role": "system", "content": _BUILD_SYSTEM},
-                         {"role": "user", "content": prompt}]).get("content", "")
-
-    memory_note, starter = "", None
-    if memory is not None:
-        try:
-            memory_note = memory.as_prompt(memory.recall(task), max_chars=1500)
-        except Exception:  # noqa: BLE001 — memory is a help, never a blocker
-            memory_note = ""
-        try:
-            starter = memory.recall_solution(task)   # a similar past build that passed, to adapt from
-        except Exception:  # noqa: BLE001
-            starter = None
-    if memory_note:
-        err("  (using what I remember about your stack and past fixes)")
+    # A stronger model to fall back to if the fast one can't finish the build.
+    fallback_llm = None
+    if config.fallback_model and config.fallback_model != config.model:
+        fallback_llm = Ollama(config.ollama_url, config.fallback_model, config.llm_timeout, config.num_ctx,
+                              one_at_a_time=config.one_model_at_a_time)
 
     test_cmd = args.test.split() if args.test else None
-    propose = make_propose(generate, task, log=err, memory_note=memory_note, starter=starter)
-    result = build_and_test(proj, propose, test_cmd=test_cmd, max_tries=args.tries, log=err)
+    result = run_build(task, proj, llm, memory=memory, test_cmd=test_cmd, tries=args.tries, log=err,
+                       fallback_llm=fallback_llm)
     save_backup(proj, backup_path)
-
-    # Remember this build — and the working files when it passed — so he reuses/adapts them next time.
-    if memory is not None:
-        try:
-            from .projects import Project  # noqa: F401 (kept local)
-            files = {name: proj.read(name) for name in proj.changed()} if result["ok"] else None
-            problem = problem_signature(result.get("failures", []))
-            memory.remember_build(task, str(proj.root), result["ok"], result["attempts"], problem, files=files)
-        except Exception:  # noqa: BLE001 — recording must never fail a build
-            pass
 
     print(result["diff"] or "(no changes written)")
     t = result["test"] or {}

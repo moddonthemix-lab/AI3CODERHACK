@@ -117,6 +117,60 @@ def recipe_for(task: str) -> str:
     return RECIPES.get(classify(task), "")
 
 
+BUILD_SYSTEM = (
+    "You are Builder, a careful, skilled coder. You write small, correct, self-contained projects and the "
+    "tests that prove they work. You explain briefly, then give the complete files. You never touch the "
+    "network or files outside the project. If something is unsafe or unclear, you say so instead of guessing.")
+
+
+def _generator(llm):
+    """A prompt -> text function backed by an Ollama client."""
+    def gen(prompt: str) -> str:
+        return llm.chat([{"role": "system", "content": BUILD_SYSTEM},
+                         {"role": "user", "content": prompt}]).get("content", "")
+    return gen
+
+
+def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print, fallback_llm=None):
+    """Build + test a project: recall memory, build on ``llm``, and if it fails retry once on
+    ``fallback_llm`` (the stronger/slower model) adapting what the first model produced. Records the
+    result (and the working files on success) in memory. Returns the build result dict.
+    """
+    from .projects import build_and_test, problem_signature
+
+    note = memory.as_prompt(memory.recall(task), max_chars=1500) if memory is not None else ""
+    starter = None
+    if memory is not None:
+        try:
+            starter = memory.recall_solution(task)
+        except Exception:  # noqa: BLE001
+            starter = None
+
+    propose = make_propose(_generator(llm), task, log=log, memory_note=note, starter=starter)
+    result = build_and_test(project, propose, test_cmd=test_cmd, max_tries=tries, log=log)
+
+    if not result["ok"] and fallback_llm is not None:
+        try:
+            available = fallback_llm.available()
+        except Exception:  # noqa: BLE001
+            available = False
+        if available:
+            log("  the fast model couldn't finish it — retrying with the stronger model (slower)…")
+            current = {name: project.read(name) for name in project.changed()}
+            propose2 = make_propose(_generator(fallback_llm), task, log=log, memory_note=note,
+                                    starter={"task": task, "files": current} if current else starter)
+            result = build_and_test(project, propose2, test_cmd=test_cmd, max_tries=tries, log=log)
+
+    if memory is not None:
+        try:
+            files = {name: project.read(name) for name in project.changed()} if result["ok"] else None
+            memory.remember_build(task, str(project.root), result["ok"], result["attempts"],
+                                  problem_signature(result.get("failures", [])), files=files)
+        except Exception:  # noqa: BLE001 — recording must never fail a build
+            pass
+    return result
+
+
 def files_from_reply(text: str) -> tuple[str, dict[str, str]]:
     """Split a model reply into (summary, {path: content}). Returns {} if no valid FILES_JSON is found."""
     m = re.search(r"FILES_JSON:\s*(\{.*\})\s*$", text, re.S)

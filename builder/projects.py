@@ -165,7 +165,15 @@ def build_and_test(project: Project, propose, test_cmd=None, run=None, max_tries
     failure, failures = None, []
     for attempt in range(1, max_tries + 1):
         current = {name: project.read(name) for name in project.changed()}   # what he wrote so far
-        files = propose({"attempt": attempt, "failure": failure, "diff": project.diff(), "files": current})
+        try:
+            files = propose({"attempt": attempt, "failure": failure, "diff": project.diff(), "files": current})
+        except Exception as e:  # noqa: BLE001 — a model hiccup (timeout, repeat-loop) shouldn't kill the build
+            failure = f"the model errored while generating: {e}"
+            failures.append(failure)
+            result = {"ok": False, "attempts": attempt, "test": {"stderr": failure, "stdout": ""},
+                      "diff": project.diff(), "failures": failures}
+            log(f"  generation failed on attempt {attempt} ({e}); trying again…")
+            continue
         if files:
             project.write_all(files)
         test = run(project.root, test_cmd)

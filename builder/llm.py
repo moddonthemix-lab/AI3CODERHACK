@@ -104,7 +104,9 @@ class Ollama:
 
         ``schema`` (a JSON schema) constrains the answer exactly; ``json_mode`` only asks for some JSON.
         """
-        options = {"temperature": 0.2, "num_ctx": self.num_ctx}  # a researcher should be steady, not creative
+        # Steady, not creative — but with a repeat penalty so a small model can't get stuck looping the
+        # same tokens (which Ollama aborts with "token repeat limit reached").
+        options = {"temperature": 0.3, "num_ctx": self.num_ctx, "repeat_penalty": 1.15, "repeat_last_n": 256}
         structured = json_mode or schema is not None
         if structured or max_tokens:
             options["num_predict"] = max_tokens or self.max_output  # a stuck model can't ramble forever

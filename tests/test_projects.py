@@ -243,6 +243,52 @@ def test_problem_signature_pulls_out_the_error():
     assert problem_signature([]) == ""
 
 
+def test_build_falls_back_to_the_stronger_model(tmp_path):
+    from builder.buildagent import run_build
+
+    class FakeLLM:
+        def __init__(self, reply, model):
+            self._r, self.model = reply, model
+
+        def available(self):
+            return True
+
+        def chat(self, messages, **kw):
+            return {"content": self._r}
+
+    test = "from app import add\\ndef test_add():\\n    assert add(2, 3) == 5\\n"
+    fast = FakeLLM('draft\nFILES_JSON: {"app.py": "def add(a, b):\\n    return a - b\\n", "test_app.py": "'
+                   + test + '"}', "fast-3b")                 # buggy: a - b -> test fails
+    strong = FakeLLM('fixed\nFILES_JSON: {"app.py": "def add(a, b):\\n    return a + b\\n", "test_app.py": "'
+                     + test + '"}', "strong-7b")             # correct
+
+    allowed = tmp_path / "Projects"
+    allowed.mkdir()
+    proj = Project(allowed / "adder", cfg_for(allowed, home=tmp_path))
+    # fast model alone can't pass; with the stronger fallback it does
+    assert run_build("an add function", proj, fast, tries=2)["ok"] is False
+    proj2 = Project(allowed / "adder2", cfg_for(allowed, home=tmp_path))
+    result = run_build("an add function", proj2, fast, tries=2, fallback_llm=strong)
+    assert result["ok"] is True
+    assert "return a + b" in (proj2.root / "app.py").read_text()
+
+
+def test_build_survives_a_model_error(tmp_path):
+    from builder.buildagent import make_propose
+    from builder.projects import build_and_test
+
+    def boom(prompt):
+        raise RuntimeError("Ollama returned 500: token repeat limit reached")
+
+    allowed = tmp_path / "Projects"
+    allowed.mkdir()
+    proj = Project(allowed / "x", cfg_for(allowed, home=tmp_path))
+    propose = make_propose(boom, "a thing", log=lambda m: None)
+    result = build_and_test(proj, propose, run=lambda r, c: {"ok": False, "stderr": "", "stdout": ""},
+                            max_tries=2, log=lambda m: None)
+    assert result["ok"] is False and result["attempts"] == 2   # a generation error doesn't crash the build
+
+
 def test_reuses_a_past_working_solution_to_build_faster(tmp_path):
     from builder.db import Store
     from builder.memory import Memory
