@@ -81,6 +81,11 @@
     <div id="builds"><span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span></div>
   </div>
 
+  <div class="panel">
+    <h2>What he knows <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">— lessons &amp; notes he applies to your work (offline)</span></h2>
+    <div id="knows"><span class="empty">nothing yet — teach him with <code>builder feedback "…"</code> or <code>builder remember "…"</code></span></div>
+  </div>
+
 <script>
 const $ = id => document.getElementById(id);
 let TOKEN = "";
@@ -126,6 +131,12 @@ async function refresh() {
       (b.dir ? ` <a href="/preview?path=${encodeURIComponent(b.dir)}" target="_blank" style="color:var(--accent)">preview ↗</a>` : "") +
       (b.problem ? `<div class="fix">problem solved: ${esc(b.problem)}</div>` : "") + `</div>`).join("")
       : `<span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span>`;
+    const [lessons, notes] = await Promise.all([api("/api/lessons"), api("/api/notes?limit=15")]);
+    const items = lessons.map(l => `<div class="rev"><span class="sev low">LESSON</span>${esc(l.text)}</div>`)
+      .concat(notes.map(n => `<div class="rev"><span class="sev med">NOTE</span>${esc(n.content)}` +
+        `<span style="color:var(--dim)"> · ${esc(n.topic)}</span></div>`));
+    $("knows").innerHTML = items.length ? items.join("")
+      : `<span class="empty">nothing yet — teach him with <code>builder feedback "…"</code> or <code>builder remember "…"</code></span>`;
   } catch (e) {
     $("status").textContent = "can't reach Builder";
   }

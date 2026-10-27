@@ -172,6 +172,8 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                     return self._send(200, store.builds(qs.get("q", ""), int(qs.get("limit", 25))))
                 if url.path == "/api/lessons":
                     return self._send(200, store.lessons())
+                if url.path == "/api/notes":
+                    return self._send(200, store.recall(qs.get("q", ""), int(qs.get("limit", 25))))
                 if url.path == "/api/inbox":
                     return self._send(200, store.inbox(qs.get("unread") in ("1", "true"), int(qs.get("limit", 30))))
                 if url.path == "/api/pending":
