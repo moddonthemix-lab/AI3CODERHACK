@@ -99,7 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("feedback", help="Teach Builder: a preference, correction or strategy")
     s.add_argument("text", nargs="+")
     s.add_argument("--kind", choices=LESSON_KINDS, default="preference")
-    sub.add_parser("lessons", help="What Builder has learned from your feedback")
+    s = sub.add_parser("lessons", help="What Builder has learned from your feedback")
+    s.add_argument("--forget", type=int, metavar="ID", help="remove a lesson you taught him (by its id)")
 
     s = sub.add_parser("remember", help="Save a note about the boss (stack, preferences)")
     s.add_argument("text", nargs="+")
@@ -454,7 +455,10 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "feedback":
             print(f"lesson #{memory.learn(' '.join(args.text), args.kind)} — Builder will apply it from now on")
         elif cmd == "lessons":
-            _print_rows(db.lessons(), ["id", "kind", "origin", "created_at", "text"], 90)
+            if args.forget is not None:
+                print("removed" if db.retire_lesson(args.forget) else "no lesson with that id")
+            else:
+                _print_rows(db.lessons(), ["id", "kind", "origin", "created_at", "text"], 90)
         elif cmd == "remember":
             print(f"note #{db.remember(' '.join(args.text), args.topic)} saved")
         elif cmd == "recall":
