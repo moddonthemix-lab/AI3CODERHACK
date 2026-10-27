@@ -174,7 +174,12 @@ def test_builder_picks_the_project_shape_from_a_plain_request():
     assert classify("a portfolio website") == "web"
     assert classify("a REST api for todos") == "api"
     assert classify("a command line tool to rename files") == "cli"
+    assert classify("a desktop app with tkinter") == "gui"
+    assert classify("a tool to convert a csv to json") == "data"
+    assert classify("a reusable library for dates") == "library"
     assert classify("add two numbers") == "default"
+    assert "tkinter" in recipe_for("a tkinter desktop app")
+    assert "sample data" in recipe_for("convert csv to json")
     # and the recipe tells the model to make a game playable + tested, without the boss spelling it out
     assert "PLAYABLE" in recipe_for("a pong game") and "index.html" in recipe_for("a pong game")
     assert recipe_for("add two numbers") == ""

@@ -55,6 +55,20 @@ RECIPES = {
         "- Use http.server from the standard library (NEVER flask/fastapi — not installed).\n"
         "- Put the request handling logic in plain FUNCTIONS, and add a pytest test that calls those\n"
         "  functions directly (do NOT start the server at import time or in the test)."),
+    "gui": (
+        "\n\nThis is a DESKTOP GUI app — tkinter is in the standard library, so use it (never PyQt/wx):\n"
+        "- Put ALL the logic in plain functions; build the window under `if __name__ == '__main__':` only.\n"
+        "- The pytest test imports and checks the logic functions and NEVER opens a window (the sandbox is\n"
+        "  headless, so a test that creates a Tk() will fail)."),
+    "data": (
+        "\n\nThis is a DATA tool — read/transform/output using only the standard library (csv, json, re):\n"
+        "- Put the transformation in plain functions that take data in and return data out.\n"
+        "- The pytest test feeds in small sample data and checks the result. Don't read real files or take\n"
+        "  input at import time."),
+    "library": (
+        "\n\nThis is a REUSABLE module — a single .py with well-named functions/classes and short docstrings.\n"
+        "- No CLI or main loop unless asked.\n"
+        "- Add a THOROUGH pytest test covering normal cases AND edge cases (empty, zero, negative, bad input)."),
     "cli": (
         "\n\nThis is a TOOL/SCRIPT:\n"
         "- Put the real work in plain functions in a .py, with a tiny argparse CLI under\n"
@@ -65,9 +79,13 @@ RECIPES = {
 _KIND_WORDS = {
     "game": ("game", "pong", "snake", "tetris", "breakout", "arcade", "puzzle", "platformer", "shooter",
              "flappy", "2048", "tic-tac-toe", "tic tac toe", "maze"),
+    "gui": ("gui", "desktop app", "tkinter", "window app", "app with buttons", "desktop application"),
     "web": ("website", "web site", "web page", "webpage", "landing page", "portfolio", "html page",
             "site", "homepage", "blog"),
     "api": ("api", "endpoint", "rest", "server", "webhook", "microservice"),
+    "data": ("parser", "parse ", "convert", "converter", "csv", "json", "spreadsheet", "data processing",
+             "clean the data", "transform"),
+    "library": ("library", "module", "package", "reusable", "helper functions"),
     "cli": ("cli", "command line", "command-line", "script", "tool", "utility", "bot"),
 }
 

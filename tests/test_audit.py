@@ -54,6 +54,29 @@ def test_clean_code_has_no_findings():
     assert audit.scan_text(code, "app.py") == []
 
 
+def test_expanded_rules_catch_more_weaknesses():
+    checks = {
+        "Credentials in a URL": 'db = "postgres://admin:hunter2@db.example.com/app"',
+        "Server-side template injection risk": "return render_template_string(request.args['tpl'])",
+        "Insecure temp file (mktemp)": "path = tempfile.mktemp()",
+        "Weak randomness for a secret": "token = random.randint(1000, 9999)  # session token",
+        "Insecure cookie flags": "response.set_cookie('sid', v, secure=False)",
+        "CSRF protection disabled": "WTF_CSRF_ENABLED = False",
+        "Obsolete TLS/SSL version": "ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1)",
+        "Weak cipher mode (ECB)": "cipher = AES.new(key, AES.MODE_ECB)",
+    }
+    for want, line in checks.items():
+        assert want in issues(audit.scan_text(line, "app.py")), f"missed: {want}"
+
+
+def test_web_xss_rules_fire_on_js_not_python():
+    js = 'el.innerHTML = userInput;\ndocument.write(location.hash);\n'
+    found = issues(audit.scan_text(js, "page.js"))
+    assert "Possible XSS via innerHTML" in found and "Possible XSS via document.write" in found
+    # those are web rules — they must not fire on a .py file
+    assert audit.scan_text("el.innerHTML = x", "app.py") == []
+
+
 def test_aws_key_and_private_key_are_high():
     f = audit.scan_text('k = "AKIAIOSFODNN7EXAMPLE"\n', "settings.py")
     assert any(x.issue == "AWS access key id in source" and x.severity == "high" for x in f)
