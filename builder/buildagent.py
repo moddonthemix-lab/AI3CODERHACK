@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 
-from .templates import template_files, template_names  # noqa: F401
+from .templates import game_template_for, template_files, template_names  # noqa: F401
 
 FILE_CONTRACT = """
 
@@ -187,10 +187,20 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     from .projects import build_and_test, problem_signature
 
     note = memory.as_prompt(memory.recall(task), max_chars=1500) if memory is not None else ""
+
+    # If the folder ALREADY has a project in it, Builder MODIFIES it: its current files become the starting
+    # point, so "make the ball faster" / "add a second paddle" adapts the real code instead of starting over.
     starter = None
-    if memory is not None:
+    try:
+        existing = project.existing_files()
+    except Exception:  # noqa: BLE001
+        existing = {}
+    if existing:
+        log("  (this folder already has a project — adapting what's there instead of starting fresh)")
+        starter = {"task": f"the existing project in this folder (modify it): {task}", "files": existing}
+    elif memory is not None:
         try:
-            starter = memory.recall_solution(task)
+            starter = memory.recall_solution(task)   # no project here yet — reuse a close past build if any
         except Exception:  # noqa: BLE001
             starter = None
 
@@ -270,6 +280,11 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
     # template for this kind). It's kept as the guaranteed baseline, so a build can't come out empty/broken.
     if starter and starter.get("files"):
         baseline_files, baseline_task = dict(starter["files"]), starter.get("task", "")
+    elif kind == "game":
+        # Start from the SPECIFIC game the request names (pong/breakout/snake), not a generic starter,
+        # so "a pong game" adapts real Pong instead of the snake-ish default.
+        gkind = game_template_for(task)
+        baseline_files, baseline_task = template_files(gkind), f"a working {gkind} game"
     else:
         baseline_files, baseline_task = template_files(kind), f"a working {kind} starter"
     files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in baseline_files.items())

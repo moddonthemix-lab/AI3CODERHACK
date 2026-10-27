@@ -66,6 +66,165 @@ _GAME_TEST = """def test_game_has_the_essentials():
     assert 'getContext' in html
 """
 
+# ---------------------------------------------------------------- pong (two paddles, bouncing ball)
+_PONG_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Pong</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:sans-serif;text-align:center}
+canvas{background:#000;display:block;margin:12px auto;border:2px solid #333}</style></head>
+<body>
+<h1>Pong</h1>
+<p>You are the LEFT paddle. Move with the Up / Down arrow keys (or W / S). First to 5 wins.</p>
+<canvas id="game" width="640" height="400"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const PADDLE_H = 70, PADDLE_W = 10, BALL = 8;
+let playerY = 165, cpuY = 165;
+let ball = {x: 320, y: 200, vx: 4, vy: 3};
+let playerScore = 0, cpuScore = 0;
+let up = false, down = false;
+
+function resetBall(dir) {
+  ball = {x: 320, y: 200, vx: 4 * dir, vy: (Math.random() * 4 - 2) || 2};
+}
+function update() {
+  if (up) playerY -= 6;
+  if (down) playerY += 6;
+  if (playerY < 0) playerY = 0;
+  if (playerY > canvas.height - PADDLE_H) playerY = canvas.height - PADDLE_H;
+
+  // simple CPU: follow the ball
+  const target = ball.y - PADDLE_H / 2;
+  if (cpuY < target) cpuY += 4;
+  else if (cpuY > target) cpuY -= 4;
+
+  ball.x += ball.vx; ball.y += ball.vy;
+  if (ball.y < 0 || ball.y > canvas.height - BALL) ball.vy = -ball.vy;
+
+  // left paddle hit
+  if (ball.x < PADDLE_W && ball.y > playerY && ball.y < playerY + PADDLE_H) {
+    ball.vx = Math.abs(ball.vx); ball.vx *= 1.03;
+  }
+  // right paddle hit
+  if (ball.x > canvas.width - PADDLE_W - BALL && ball.y > cpuY && ball.y < cpuY + PADDLE_H) {
+    ball.vx = -Math.abs(ball.vx); ball.vx *= 1.03;
+  }
+  if (ball.x < 0) { cpuScore++; resetBall(1); }
+  if (ball.x > canvas.width) { playerScore++; resetBall(-1); }
+}
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, playerY, PADDLE_W, PADDLE_H);
+  ctx.fillRect(canvas.width - PADDLE_W, cpuY, PADDLE_W, PADDLE_H);
+  ctx.fillRect(ball.x, ball.y, BALL, BALL);
+  ctx.font = '24px sans-serif';
+  ctx.fillText(playerScore, canvas.width / 2 - 40, 30);
+  ctx.fillText(cpuScore, canvas.width / 2 + 24, 30);
+}
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowUp' || e.key === 'w') up = true;
+  if (e.key === 'ArrowDown' || e.key === 's') down = true;
+});
+document.addEventListener('keyup', function (e) {
+  if (e.key === 'ArrowUp' || e.key === 'w') up = false;
+  if (e.key === 'ArrowDown' || e.key === 's') down = false;
+});
+loop();
+</script>
+</body></html>
+"""
+_PONG_TEST = """def test_pong_has_the_essentials():
+    html = open('index.html').read()
+    assert '<canvas' in html
+    assert 'requestAnimationFrame' in html
+    assert 'addEventListener' in html
+    assert 'getContext' in html
+    # two paddles and a score make it pong, not just any canvas
+    assert 'playerY' in html and 'cpuY' in html
+    assert 'Score' in html or 'playerScore' in html
+"""
+
+# ---------------------------------------------------------------- breakout (paddle + bricks)
+_BREAKOUT_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Breakout</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:sans-serif;text-align:center}
+canvas{background:#000;display:block;margin:12px auto;border:2px solid #333}</style></head>
+<body>
+<h1>Breakout</h1>
+<p>Move the paddle with the Left / Right arrow keys. Clear all the bricks.</p>
+<canvas id="game" width="480" height="420"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const PADDLE_W = 80, PADDLE_H = 10, BALL = 8;
+const COLS = 8, ROWS = 4, BRICK_W = 56, BRICK_H = 18, PAD = 4, TOP = 30;
+let paddleX = 200;
+let ball = {x: 240, y: 300, vx: 3, vy: -3};
+let score = 0, left = false, right = false;
+let bricks = [];
+for (let r = 0; r < ROWS; r++)
+  for (let c = 0; c < COLS; c++)
+    bricks.push({x: c * (BRICK_W + PAD) + PAD, y: r * (BRICK_H + PAD) + TOP, alive: true});
+
+function update() {
+  if (left) paddleX -= 6;
+  if (right) paddleX += 6;
+  if (paddleX < 0) paddleX = 0;
+  if (paddleX > canvas.width - PADDLE_W) paddleX = canvas.width - PADDLE_W;
+
+  ball.x += ball.vx; ball.y += ball.vy;
+  if (ball.x < 0 || ball.x > canvas.width - BALL) ball.vx = -ball.vx;
+  if (ball.y < 0) ball.vy = -ball.vy;
+
+  // paddle bounce
+  if (ball.y > canvas.height - PADDLE_H - BALL &&
+      ball.x > paddleX && ball.x < paddleX + PADDLE_W) ball.vy = -Math.abs(ball.vy);
+  if (ball.y > canvas.height) { ball = {x: 240, y: 300, vx: 3, vy: -3}; }  // missed: reset
+
+  // brick collisions
+  for (const b of bricks) {
+    if (!b.alive) continue;
+    if (ball.x < b.x + BRICK_W && ball.x + BALL > b.x &&
+        ball.y < b.y + BRICK_H && ball.y + BALL > b.y) {
+      b.alive = false; ball.vy = -ball.vy; score += 10;
+    }
+  }
+}
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#4da3ff';
+  for (const b of bricks) if (b.alive) ctx.fillRect(b.x, b.y, BRICK_W, BRICK_H);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(paddleX, canvas.height - PADDLE_H, PADDLE_W, PADDLE_H);
+  ctx.fillRect(ball.x, ball.y, BALL, BALL);
+  ctx.font = '16px sans-serif';
+  ctx.fillText('Score: ' + score, 10, 20);
+}
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowLeft') left = true;
+  if (e.key === 'ArrowRight') right = true;
+});
+document.addEventListener('keyup', function (e) {
+  if (e.key === 'ArrowLeft') left = false;
+  if (e.key === 'ArrowRight') right = false;
+});
+loop();
+</script>
+</body></html>
+"""
+_BREAKOUT_TEST = """def test_breakout_has_the_essentials():
+    html = open('index.html').read()
+    assert '<canvas' in html
+    assert 'requestAnimationFrame' in html
+    assert 'addEventListener' in html
+    assert 'getContext' in html
+    assert 'bricks' in html
+    assert 'Score' in html or 'score' in html
+"""
+
 # ---------------------------------------------------------------- website (landing page)
 _SITE_HTML = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -194,6 +353,12 @@ def test_add():
 TEMPLATES = {
     "game": {"desc": "A playable arrow-key canvas game (index.html) + a test",
              "files": {"index.html": _GAME_HTML, "test_game.py": _GAME_TEST}},
+    "snake": {"desc": "Classic Snake — move with arrows, eat dots to score (index.html) + a test",
+              "files": {"index.html": _GAME_HTML, "test_game.py": _GAME_TEST}},
+    "pong": {"desc": "Pong — your paddle vs the CPU, bouncing ball, score (index.html) + a test",
+             "files": {"index.html": _PONG_HTML, "test_pong.py": _PONG_TEST}},
+    "breakout": {"desc": "Breakout — paddle, ball and bricks to clear (index.html) + a test",
+                 "files": {"index.html": _BREAKOUT_HTML, "test_breakout.py": _BREAKOUT_TEST}},
     "web": {"desc": "A responsive one-page website (index.html) + a test",
             "files": {"index.html": _SITE_HTML, "test_site.py": _SITE_TEST}},
     "api": {"desc": "A JSON API using the standard library (app.py) + tests",
@@ -207,7 +372,21 @@ TEMPLATES = {
 # Friendly aliases people might type for `builder new`.
 ALIASES = {"website": "web", "site": "web", "server": "api", "tool": "cli", "script": "cli",
            "python": "default", "module": "default", "library": "default", "gui": "default",
-           "data": "default", "snake": "game", "pong": "game"}
+           "data": "default", "arcade": "game"}
+
+# Which concrete game a plain request is asking for, so "a pong game" starts from real Pong (not the
+# generic snake-ish starter). Checked most-specific first.
+_GAME_KINDS = (("pong", "pong"), ("breakout", "breakout"), ("brick", "breakout"),
+               ("snake", "snake"))
+
+
+def game_template_for(task: str) -> str:
+    """The best-matching game template name for a plain request (pong/breakout/snake), else the generic 'game'."""
+    t = (task or "").lower()
+    for word, name in _GAME_KINDS:
+        if word in t:
+            return name
+    return "game"
 
 
 def template_files(kind: str, db=None) -> dict:

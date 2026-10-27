@@ -97,6 +97,34 @@ class Project:
         """Files Builder has written this session (relative paths)."""
         return sorted(self._backups)
 
+    def existing_files(self, max_files: int = 20, max_bytes: int = 60000) -> dict[str, str]:
+        """The small text files already in the project folder (relpath -> content).
+
+        This is what lets ``builder build`` MODIFY a project he built earlier: the current files are handed
+        to the model as the starting point, so a request like "make the ball faster" adapts the real code
+        instead of starting from a blank template. Skips hidden files, caches, tests' bytecode, and anything
+        large or binary so the prompt stays small.
+        """
+        out: dict[str, str] = {}
+        skip_dirs = {"__pycache__", ".git", ".venv", "node_modules", ".pytest_cache"}
+        for p in sorted(self.root.rglob("*")):
+            if len(out) >= max_files:
+                break
+            if not p.is_file():
+                continue
+            rel = p.relative_to(self.root)
+            if any(part in skip_dirs or part.startswith(".") for part in rel.parts):
+                continue
+            if p.suffix in (".pyc", ".pyo", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".zip", ".so"):
+                continue
+            try:
+                if p.stat().st_size > max_bytes:
+                    continue
+                out[str(rel)] = p.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+        return out
+
     def diff(self) -> str:
         """A unified diff of everything Builder changed this session — what the boss reviews before keeping it."""
         chunks = []

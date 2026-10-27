@@ -222,6 +222,48 @@ def test_game_build_starts_from_the_builtin_playable_template():
     assert "ADAPT it" in seen[0] and "getContext" in seen[0]       # the working template is in the prompt
 
 
+def test_game_request_picks_the_matching_specific_template():
+    from builder.templates import game_template_for
+    assert game_template_for("a space pong game") == "pong"
+    assert game_template_for("make me a snake game") == "snake"
+    assert game_template_for("breakout with bricks") == "breakout"
+    assert game_template_for("a fun little arcade game") == "game"   # generic when nothing specific
+
+
+def test_pong_request_starts_from_real_pong_not_snake():
+    # "a pong game" must adapt actual Pong (two paddles), not the snake-ish generic starter
+    seen = []
+    propose = make_propose(lambda p: (seen.append(p), 'x\nFILES_JSON: {}')[1], "a space pong game",
+                           log=lambda m: None, starter=None)
+    propose({"attempt": 1, "failure": None, "diff": ""})
+    assert "playerY" in seen[0] and "cpuY" in seen[0]               # the real Pong template is in the prompt
+    assert "Eat the red dots" not in seen[0]                        # NOT the snake starter
+
+
+def test_build_in_an_existing_folder_adapts_what_is_there(tmp_path):
+    # the modify path: an existing project's files become the starting point for the next build
+    from builder.buildagent import run_build
+
+    class Cfg:
+        code_dirs = [str(tmp_path)]
+
+    (tmp_path / "index.html").write_text("<canvas id='g'></canvas><!-- MY OWN PONG -->")
+    (tmp_path / "test_game.py").write_text("def test_it():\n    assert '<canvas' in open('index.html').read()\n")
+    proj = Project(tmp_path, Cfg())
+
+    seen = []
+    class LLM:
+        def available(self): return True
+        def chat(self, msgs):
+            seen.append(msgs[-1]["content"])
+            return {"content": "ok\nFILES_JSON: {}"}       # model changes nothing; template fallback keeps it runnable
+
+    run_build("make the ball faster", proj, LLM(), tries=1, log=lambda m: None)
+    assert seen, "the model should have been asked"
+    assert "MY OWN PONG" in seen[0]                         # his current file was handed back to adapt
+    assert "modify it" in seen[0]
+
+
 # --------------------------------------------------------------------------- persisted undo
 def test_save_and_restore_backup_across_runs(tmp_path):
     allowed = tmp_path / "Projects"

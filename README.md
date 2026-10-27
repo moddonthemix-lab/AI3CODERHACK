@@ -97,6 +97,20 @@ builder build --undo --dir ~/Projects/pong      # restore it if you don't want i
 
 He writes the project, runs its tests, fixes failures, and shows you the diff. Works with the Wi-Fi off.
 
+**Games start from the real thing.** Ask for *pong*, *snake* or *breakout* and he begins from a complete,
+playable version of that game and adapts it — so "a pong game" comes out as actual Pong, not a mash-up.
+The more specific your request ("two paddles, ball speeds up, first to 5"), the closer it lands.
+
+**Modify something he already built.** Point `build` at a folder that already has a project and he
+*edits what's there* instead of starting over:
+
+```bash
+builder build "make the ball faster and add a start screen" --dir ~/Projects/pong
+builder preview ~/Projects/pong                 # see the change (undo with --undo)
+```
+
+He reads the current files, changes only what your request needs, re-runs the tests, and shows the diff.
+
 ### Review your own code
 
 ```bash
