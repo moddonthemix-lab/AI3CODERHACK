@@ -21,7 +21,19 @@ You are writing a small, self-contained project. Reply with:
 Rules:
 - Include the project's OWN tests (e.g. a test_*.py using pytest) so the work can be verified.
 - Give the COMPLETE contents of every file you want written — not a diff, not "...".
-- Keep it to the files that matter. Use relative paths only (never a leading / or ..)."""
+- Keep it to the files that matter. Use relative paths only (never a leading / or ..).
+
+This runs in a HEADLESS sandbox with NO internet, NO new packages, and a short time limit, so:
+- Use ONLY the Python standard library (or plain HTML/CSS/JavaScript). Do NOT import third-party packages
+  like pygame, flask, numpy, requests — they are not installed and cannot be installed.
+- Put the real logic in PLAIN FUNCTIONS the test can call directly (e.g. move(state), is_collision(...)).
+  Never put a `while True:` loop, `input()`, a game window, or a server at module top level — importing the
+  file must return immediately, or the test will hang and fail.
+- The test must import those functions and check them WITHOUT opening a window, a screen or a network
+  connection, and WITHOUT running the main loop.
+- For a GAME or a WEBSITE, prefer a SINGLE self-contained .html file (canvas/JS) for what the user runs,
+  AND a small testable .py (or the pure logic) with a pytest test. Keep the drawing/animation out of the
+  tested part."""
 
 
 def files_from_reply(text: str) -> tuple[str, dict[str, str]]:
