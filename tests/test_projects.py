@@ -164,6 +164,28 @@ def test_make_propose_feeds_failure_back_to_the_model():
     assert "FAILING" in seen[1] and "boom" in seen[1]                # the error output is given to the model
 
 
+def test_builder_picks_the_project_shape_from_a_plain_request():
+    from builder.buildagent import classify, recipe_for
+    # the boss just says the plain thing; Builder works out the shape
+    assert classify("build a pong game") == "game"
+    assert classify("make me a snake game") == "game"
+    assert classify("a portfolio website") == "web"
+    assert classify("a REST api for todos") == "api"
+    assert classify("a command line tool to rename files") == "cli"
+    assert classify("add two numbers") == "default"
+    # and the recipe tells the model to make a game playable + tested, without the boss spelling it out
+    assert "PLAYABLE" in recipe_for("a pong game") and "index.html" in recipe_for("a pong game")
+    assert recipe_for("add two numbers") == ""
+
+
+def test_plain_game_request_injects_the_playable_recipe():
+    seen = []
+    propose = make_propose(lambda p: (seen.append(p), 'ok\nFILES_JSON: {}')[1], "build a pong game",
+                           log=lambda m: None)
+    propose({"attempt": 1, "failure": None, "diff": ""})
+    assert "PLAYABLE" in seen[0] and "index.html" in seen[0]         # the boss didn't have to ask for HTML
+
+
 # --------------------------------------------------------------------------- persisted undo
 def test_save_and_restore_backup_across_runs(tmp_path):
     allowed = tmp_path / "Projects"

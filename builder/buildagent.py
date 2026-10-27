@@ -36,6 +36,56 @@ This runs in a HEADLESS sandbox with NO internet, NO new packages, and a short t
   tested part."""
 
 
+# Builder works out the right shape of project from a plain request, so the boss doesn't have to spell out
+# "single HTML file, canvas, with a test" every time. Each kind adds concrete, buildable-and-testable specs.
+RECIPES = {
+    "game": (
+        "\n\nThis is a GAME — make it actually PLAYABLE, not just logic:\n"
+        "- index.html: ONE self-contained file (inline CSS + JS, a <canvas>), keyboard/mouse controls, an\n"
+        "  on-screen score, and a game loop with requestAnimationFrame. It must run by just opening the file.\n"
+        "- logic.py: the pure rules (move, collision, score) as plain functions.\n"
+        "- test_logic.py: a pytest test that imports logic.py and checks those functions (no window)."),
+    "web": (
+        "\n\nThis is a WEBSITE/PAGE — make it viewable:\n"
+        "- index.html: ONE self-contained file with inline CSS (and JS if needed). It must look right when\n"
+        "  opened directly in a browser.\n"
+        "- If there's any logic/data, put it in a small .py with a pytest test (test_*.py)."),
+    "api": (
+        "\n\nThis is a small API/SERVER — standard library only:\n"
+        "- Use http.server from the standard library (NEVER flask/fastapi — not installed).\n"
+        "- Put the request handling logic in plain FUNCTIONS, and add a pytest test that calls those\n"
+        "  functions directly (do NOT start the server at import time or in the test)."),
+    "cli": (
+        "\n\nThis is a TOOL/SCRIPT:\n"
+        "- Put the real work in plain functions in a .py, with a tiny argparse CLI under\n"
+        "  `if __name__ == '__main__':` (never run work or input() at import time).\n"
+        "- Add a pytest test that imports and checks those functions."),
+}
+
+_KIND_WORDS = {
+    "game": ("game", "pong", "snake", "tetris", "breakout", "arcade", "puzzle", "platformer", "shooter",
+             "flappy", "2048", "tic-tac-toe", "tic tac toe", "maze"),
+    "web": ("website", "web site", "web page", "webpage", "landing page", "portfolio", "html page",
+            "site", "homepage", "blog"),
+    "api": ("api", "endpoint", "rest", "server", "webhook", "microservice"),
+    "cli": ("cli", "command line", "command-line", "script", "tool", "utility", "bot"),
+}
+
+
+def classify(task: str) -> str:
+    """Guess the kind of project from a plain request, so Builder adds the right build recipe himself."""
+    t = " " + task.lower() + " "
+    for kind, words in _KIND_WORDS.items():
+        if any(w in t for w in words):
+            return kind
+    return "default"
+
+
+def recipe_for(task: str) -> str:
+    """The extra, concrete build spec for this kind of task (empty for a generic project)."""
+    return RECIPES.get(classify(task), "")
+
+
 def files_from_reply(text: str) -> tuple[str, dict[str, str]]:
     """Split a model reply into (summary, {path: content}). Returns {} if no valid FILES_JSON is found."""
     m = re.search(r"FILES_JSON:\s*(\{.*\})\s*$", text, re.S)
@@ -64,15 +114,20 @@ def make_propose(generate, task: str, log=print, memory_note: str = ""):
     work benefits from memory even offline.
     """
     note = (f"\n\nWhat you remember (apply it):\n{memory_note}\n" if memory_note else "")
+    recipe = recipe_for(task)          # Builder works out the right project shape from the plain request
+    contract = FILE_CONTRACT + recipe
+    kind = classify(task)
+    if kind != "default":
+        log(f"  (building this as a {kind} — making it {'playable' if kind == 'game' else 'runnable'} and tested)")
 
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
             prompt = (f"Task: {task}{note}\n\nYour code's tests are FAILING. Here is the output:\n\n"
                       f"{ctx['failure'][:6000]}\n\nFix the code (and tests if wrong) and return the full files."
-                      + FILE_CONTRACT)
+                      + contract)
             log(f"  asking the coder model to fix attempt {ctx['attempt'] - 1}'s failures…")
         else:
-            prompt = f"Task: {task}{note}" + FILE_CONTRACT
+            prompt = f"Task: {task}{note}" + contract
             log("  asking the coder model to write the project…")
         summary, files = files_from_reply(generate(prompt))
         if summary:
