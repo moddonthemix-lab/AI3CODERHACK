@@ -55,8 +55,18 @@
   </div>
 
   <div class="panel">
-    <h2>Ask Builder</h2>
-    <input id="q" placeholder="Ask a coding or security question…">
+    <h2>Scan for security issues</h2>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <span style="color:var(--dim); font-size:13px">folder:</span>
+      <input id="sdir" placeholder="(leave blank to scan your whole workspace)" style="flex:1; min-width:140px">
+      <button onclick="scan()" id="sbtn">Scan</button>
+    </div>
+    <div id="sout" style="white-space:pre-wrap; margin-top:10px; font-size:13px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Ask Builder <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0">— coding or defensive-security questions</span></h2>
+    <input id="q" placeholder="e.g. how do I store passwords safely? how does phishing work?">
     <div style="margin-top:10px"><button onclick="ask()">Ask</button></div>
     <div id="reply"></div>
   </div>
@@ -148,8 +158,29 @@ async function build() {
   } catch (e) { $("bout").textContent = "error: " + e; }
   $("bbtn").disabled = false;
 }
+async function scan() {
+  if (!SPACE) { $("sout").textContent = "No workspace set. Add BUILDER_CODE_DIRS to your .env and restart."; return; }
+  const name = $("sdir").value.trim();
+  const path = name ? SPACE.replace(/\/+$/, "") + "/" + name : SPACE;
+  $("sbtn").disabled = true;
+  $("sout").textContent = "Scanning " + path + " …";
+  try {
+    const r = await api("/api/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+    if (r.error) { $("sout").textContent = "✗ " + r.error; }
+    else if (!r.findings || !r.findings.length) { $("sout").textContent = "✓ No defensive issues found. (Heuristics — still review important code by hand.)"; refresh(); }
+    else {
+      const mark = { high: "🔴 HIGH", med: "🟠 MED ", low: "🟡 LOW " };
+      $("sout").innerHTML = r.findings.map(f =>
+        `${mark[f.severity] || f.severity}  ${esc(f.issue)}` + (f.file ? ` <span style="color:var(--dim)">(${esc(f.file)}:${f.line})</span>` : "") +
+        (f.fix ? `<div class="fix">fix: ${esc(f.fix)}</div>` : "")).join("<br>");
+      refresh();
+    }
+  } catch (e) { $("sout").textContent = "error: " + e; }
+  $("sbtn").disabled = false;
+}
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
 $("btask").addEventListener("keydown", e => { if (e.key === "Enter") build(); });
+$("sdir").addEventListener("keydown", e => { if (e.key === "Enter") scan(); });
 refresh(); setInterval(refresh, 15000);
 </script>
 </body>
