@@ -14,6 +14,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def load_env(path: str = ".env") -> None:
+    """Load a .env file (KEY=VALUE lines) into the environment, without overriding anything already set.
+
+    Minimal and dependency-free: blank lines and # comments are ignored, surrounding quotes are stripped,
+    and a key already in the environment always wins. Looks in the current folder first, then the repo root,
+    and stops at the first file it finds. Call this once at startup (the CLI does).
+    """
+    for p in (Path(path), Path(__file__).resolve().parent.parent / path):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key, value = key.strip(), value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+        return
+
+
 def _env(name: str, default: str = "") -> str:
     """Read BUILDER_<name>, falling back to the old SCHOLAR_<name>, then the default."""
     return os.environ.get("BUILDER_" + name) or os.environ.get("SCHOLAR_" + name) or default

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import sandbox
 from .assistant import Assistant
-from .config import Config
+from .config import Config, load_env
 from .db import LESSON_KINDS, Store
 from .llm import LLMError, Ollama
 from .memory import Memory
@@ -398,6 +398,7 @@ def _cmd_doctor(config, llm) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    load_env()  # read .env (settings like BUILDER_CODE_DIRS) so you don't have to export them every time
     config = Config()
     config.ensure_home()
     db = Store(config.db_path)
