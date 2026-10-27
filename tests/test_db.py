@@ -51,6 +51,20 @@ def test_pending_and_inbox(db):
     assert db.mark_read() == 1 and db.inbox(unread_only=True) == []
 
 
+def test_user_templates_save_list_and_override(db):
+    import json
+    from builder.templates import template_files, template_names
+    db.save_user_template("my-site", json.dumps({"index.html": "<h1>mine</h1>"}), "my landing page")
+    names = [t["name"] for t in template_names(db)]
+    assert "my-site" in names and names[0] == "my-site"          # the boss's own come first
+    assert template_files("my-site", db) == {"index.html": "<h1>mine</h1>"}   # resolves the saved one
+    assert "main.py" in template_files("game", db) or "index.html" in template_files("game", db)  # built-ins still work
+    # saving the same name again replaces it
+    db.save_user_template("my-site", json.dumps({"a.py": "x=1"}), "")
+    assert template_files("my-site", db) == {"a.py": "x=1"}
+    assert db.delete_user_template("my-site") and db.get_user_template("my-site") is None
+
+
 def test_stats_are_builder_shaped(db):
     db.add_review("a", "high", "")
     db.add_review("b", "low", "")

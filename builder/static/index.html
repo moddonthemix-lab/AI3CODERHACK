@@ -82,6 +82,20 @@
   </div>
 
   <div class="panel">
+    <h2>Templates <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">— ready-made projects. Click Use to scaffold one instantly (no waiting)</span></h2>
+    <div id="templates"><span class="empty">loading…</span></div>
+    <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">
+      <div style="color:var(--dim);font-size:13px;margin-bottom:6px">Save a folder you built as your own template:</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="tplname" placeholder="template name (e.g. my-site)" style="flex:1;min-width:120px">
+        <input id="tplfolder" placeholder="folder name" style="flex:1;min-width:100px">
+        <button onclick="saveTemplate()" id="tplbtn">Save</button>
+      </div>
+      <div id="tplout" style="color:var(--dim);font-size:12px;margin-top:6px"></div>
+    </div>
+  </div>
+
+  <div class="panel">
     <h2>What he knows <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">— lessons &amp; notes he applies to your work (offline)</span></h2>
     <div id="knows"><span class="empty">nothing yet — teach him with <code>builder feedback "…"</code> or <code>builder remember "…"</code></span></div>
   </div>
@@ -131,6 +145,11 @@ async function refresh() {
       (b.dir ? ` <a href="/preview?path=${encodeURIComponent(b.dir)}" target="_blank" style="color:var(--accent)">preview ↗</a>` : "") +
       (b.problem ? `<div class="fix">problem solved: ${esc(b.problem)}</div>` : "") + `</div>`).join("")
       : `<span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span>`;
+    const tpls = await api("/api/templates");
+    $("templates").innerHTML = tpls.map(t =>
+      `<div class="rev"><span class="sev ${t.source === 'yours' ? 'med' : 'low'}">${t.source === 'yours' ? 'YOURS' : 'BUILT-IN'}</span>` +
+      `<b>${esc(t.name)}</b> <span style="color:var(--dim)">${esc(t.desc)}</span>` +
+      ` <button onclick="scaffold('${esc(t.name)}')" style="padding:4px 10px;font-size:12px">Use</button></div>`).join("");
     const [lessons, notes] = await Promise.all([api("/api/lessons"), api("/api/notes?limit=15")]);
     const items = lessons.map(l => `<div class="rev"><span class="sev low">LESSON</span>${esc(l.text)}</div>`)
       .concat(notes.map(n => `<div class="rev"><span class="sev med">NOTE</span>${esc(n.content)}` +
@@ -190,6 +209,31 @@ async function scan() {
     }
   } catch (e) { $("sout").textContent = "error: " + e; }
   $("sbtn").disabled = false;
+}
+async function scaffold(name) {
+  if (!SPACE) { alert("No workspace set. Add BUILDER_CODE_DIRS to your .env."); return; }
+  const folder = prompt("New folder name for this " + name + ":", name);
+  if (!folder) return;
+  const dir = SPACE.replace(/\/+$/, "") + "/" + folder;
+  try {
+    const r = await api("/api/new", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, dir }) });
+    if (r.error) { alert("✗ " + r.error); return; }
+    window.open("/preview?path=" + encodeURIComponent(r.dir), "_blank");  // open it right away
+    refresh();
+  } catch (e) { alert("error: " + e); }
+}
+async function saveTemplate() {
+  const name = $("tplname").value.trim(), folder = $("tplfolder").value.trim();
+  if (!name || !folder) { $("tplout").textContent = "Enter a template name and the folder to save."; return; }
+  if (!SPACE) { $("tplout").textContent = "No workspace set."; return; }
+  const dir = SPACE.replace(/\/+$/, "") + "/" + folder;
+  $("tplbtn").disabled = true;
+  try {
+    const r = await api("/api/save-template", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, dir }) });
+    $("tplout").textContent = r.error ? ("✗ " + r.error) : `✓ saved "${name}" (${r.files.length} file(s)) — it's now in your templates above`;
+    if (!r.error) { $("tplname").value = ""; $("tplfolder").value = ""; refresh(); }
+  } catch (e) { $("tplout").textContent = "error: " + e; }
+  $("tplbtn").disabled = false;
 }
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
 $("btask").addEventListener("keydown", e => { if (e.key === "Enter") build(); });

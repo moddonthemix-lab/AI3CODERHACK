@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS builds (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+-- The boss's own saved project templates (scaffold from them, or let builds start from them).
+CREATE TABLE IF NOT EXISTS user_templates (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    descr       TEXT NOT NULL DEFAULT '',
+    files       TEXT NOT NULL DEFAULT '',       -- JSON {path: content}
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
 -- Learning from experience: the boss's feedback and preferences.
 CREATE TABLE IF NOT EXISTS lessons (
     id          INTEGER PRIMARY KEY,
@@ -202,6 +211,26 @@ class Store:
                 "SELECT * FROM builds WHERE task LIKE ? OR problem LIKE ? ORDER BY id DESC LIMIT ?",
                 (_like(query), _like(query), limit)))
         return _rows(self.conn.execute("SELECT * FROM builds ORDER BY id DESC LIMIT ?", (limit,)))
+
+    # ------------------------------------------------------------------ user templates
+    def save_user_template(self, name: str, files_json: str, descr: str = "") -> int:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO user_templates(name, descr, files) VALUES (?, ?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET descr = excluded.descr, files = excluded.files",
+                (name.strip(), descr, files_json))
+        return self.conn.execute("SELECT id FROM user_templates WHERE name = ?", (name.strip(),)).fetchone()[0]
+
+    def user_templates(self) -> list[dict]:
+        return _rows(self.conn.execute("SELECT * FROM user_templates ORDER BY name"))
+
+    def get_user_template(self, name: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM user_templates WHERE name = ?", (name.strip(),)).fetchone()
+        return dict(row) if row else None
+
+    def delete_user_template(self, name: str) -> bool:
+        with self.conn:
+            return self.conn.execute("DELETE FROM user_templates WHERE name = ?", (name.strip(),)).rowcount > 0
 
     # ------------------------------------------------------------------ lessons
     def add_lesson(self, text: str, kind: str = "preference", topic: str = "general",

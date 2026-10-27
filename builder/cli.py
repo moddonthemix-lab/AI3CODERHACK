@@ -77,10 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("preview", help="Open a built website/folder in your browser")
     s.add_argument("path", help="a file or folder inside BUILDER_CODE_DIRS")
 
-    sub.add_parser("templates", help="List the ready-made project templates")
+    sub.add_parser("templates", help="List the ready-made project templates (built-in + your saved ones)")
     s = sub.add_parser("new", help="Scaffold a working project from a template instantly (no model)")
-    s.add_argument("kind", help="game | web | api | cli | python (or: website, tool, snake, pong…)")
+    s.add_argument("kind", help="game | web | api | cli | python | <your saved template name>")
     s.add_argument("--dir", required=True, help="project folder (must be inside BUILDER_CODE_DIRS)")
+    s = sub.add_parser("save-template", help="Save a folder as your own reusable template")
+    s.add_argument("name", help="a name for your template")
+    s.add_argument("--dir", required=True, help="the project folder to save (inside BUILDER_CODE_DIRS)")
+    s.add_argument("--desc", default="", help="a short description")
 
     s = sub.add_parser("reviews", help="Security findings Builder has recorded")
     s.add_argument("query", nargs="*")
@@ -412,7 +416,28 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_doctor(config, llm)
         elif cmd == "templates":
             from .templates import template_names
-            _print_rows(template_names(), ["name", "desc"], 70)
+            _print_rows(template_names(db), ["source", "name", "desc"], 60)
+        elif cmd == "save-template":
+            import json as _json
+            from .projects import Project, ScopeError
+            try:
+                proj = Project(args.dir, config)
+            except ScopeError as e:
+                print(f"✗ {e}", file=sys.stderr)
+                return 1
+            files = {}
+            for p in sorted(proj.root.rglob("*")):
+                if p.is_file() and not ({".git", "__pycache__", ".pytest_cache"} & set(p.parts)):
+                    try:
+                        if p.stat().st_size <= 200_000:
+                            files[str(p.relative_to(proj.root))] = p.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        pass
+            if not files:
+                print("✗ no text files in that folder to save", file=sys.stderr)
+                return 1
+            db.save_user_template(args.name, _json.dumps(files), args.desc)
+            print(f"✓ Saved '{args.name}' as your template ({len(files)} file(s)). Use it: builder new {args.name} --dir <folder>")
         elif cmd == "new":
             from .templates import template_files
             from .projects import Project, ScopeError
@@ -421,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
             except ScopeError as e:
                 print(f"✗ {e}\n  Set BUILDER_CODE_DIRS first (e.g. ~/BuilderSpace).", file=sys.stderr)
                 return 1
-            files = template_files(args.kind)
+            files = template_files(args.kind, db)
             proj.write_all(files)
             print(f"✓ Created a working '{args.kind}' project in {proj.root}:")
             for name in files:

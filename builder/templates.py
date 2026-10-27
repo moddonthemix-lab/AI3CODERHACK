@@ -210,11 +210,29 @@ ALIASES = {"website": "web", "site": "web", "server": "api", "tool": "cli", "scr
            "data": "default", "snake": "game", "pong": "game"}
 
 
-def template_files(kind: str) -> dict:
-    """The working files for a template kind (with aliases); falls back to the plain Python module."""
-    kind = ALIASES.get(kind, kind)
-    return dict(TEMPLATES.get(kind, TEMPLATES["default"])["files"])
+def template_files(kind: str, db=None) -> dict:
+    """The working files for a template name. Checks the boss's saved templates first (when a db is given),
+    then the built-in ones (with aliases); falls back to the plain Python module."""
+    import json
+    name = (kind or "").strip()
+    if db is not None:
+        row = db.get_user_template(name)
+        if row:
+            try:
+                files = json.loads(row["files"])
+                if isinstance(files, dict) and files:
+                    return dict(files)
+            except (ValueError, TypeError):
+                pass
+    key = ALIASES.get(name.lower(), name.lower())
+    return dict(TEMPLATES.get(key, TEMPLATES["default"])["files"])
 
 
-def template_names() -> list[dict]:
-    return [{"name": k, "desc": v["desc"]} for k, v in TEMPLATES.items()]
+def template_names(db=None) -> list[dict]:
+    """All templates: the boss's saved ones first (source 'yours'), then the built-in ones."""
+    out = []
+    if db is not None:
+        for t in db.user_templates():
+            out.append({"name": t["name"], "desc": t.get("descr") or "(your saved template)", "source": "yours"})
+    out += [{"name": k, "desc": v["desc"], "source": "built-in"} for k, v in TEMPLATES.items()]
+    return out

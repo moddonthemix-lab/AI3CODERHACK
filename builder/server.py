@@ -180,6 +180,9 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                     return self._send(200, store.pending(qs.get("all") in ("1", "true")))
                 if url.path == "/api/lab":
                     return self._send(200, {"targets": store.lab_targets(True), "log": store.safety_events(20)})
+                if url.path == "/api/templates":
+                    from .templates import template_names
+                    return self._send(200, template_names(store))
             if url.path == "/preview":
                 return self._preview(qs.get("path", ""))
             self._send(404, {"error": "not found"})
@@ -246,6 +249,46 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                     return self._send(200, {"from": CARD["id"], "reply": ask(body["text"], sender)})
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
+            if path == "/api/new" and body.get("name") and body.get("dir"):
+                # Scaffold a working project from a template (built-in or the boss's saved one), no model.
+                if cfg is None:
+                    return self._send(503, {"error": "no workspace configured"})
+                from .projects import Project, ScopeError
+                from .templates import template_files
+                try:
+                    proj = Project(body["dir"], cfg)
+                except ScopeError as e:
+                    return self._send(403, {"error": str(e)})
+                files = template_files(body["name"], store)
+                proj.write_all(files)
+                return self._send(200, {"from": CARD["id"], "dir": str(proj.root), "files": list(files)})
+            if path == "/api/save-template" and body.get("name") and body.get("dir"):
+                # Save the files in a folder as the boss's own reusable template.
+                if cfg is None:
+                    return self._send(503, {"error": "no workspace configured"})
+                import json as _json
+                from .projects import Project, ScopeError
+                try:
+                    proj = Project(body["dir"], cfg)
+                except ScopeError as e:
+                    return self._send(403, {"error": str(e)})
+                files, total = {}, 0
+                for p in sorted(proj.root.rglob("*")):
+                    if not p.is_file() or {".git", "__pycache__", ".pytest_cache"} & set(p.parts):
+                        continue
+                    try:
+                        if p.stat().st_size > 200_000:
+                            continue
+                        files[str(p.relative_to(proj.root))] = p.read_text(encoding="utf-8")
+                        total += 1
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    if total >= 30:
+                        break
+                if not files:
+                    return self._send(400, {"error": "no text files found in that folder to save"})
+                tid = store.save_user_template(str(body["name"]), _json.dumps(files), str(body.get("desc", "")))
+                return self._send(201, {"from": CARD["id"], "id": tid, "name": body["name"], "files": list(files)})
             if path == "/api/review" and body.get("path"):
                 # Defensive review: read-only pattern scan, offline, inside Builder's allowed folders only.
                 if cfg is None:
