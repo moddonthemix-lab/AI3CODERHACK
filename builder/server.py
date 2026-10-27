@@ -82,10 +82,16 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
             self.end_headers()
             self.wfile.write(data)
 
-        def _send_bytes(self, status: int, data: bytes, ctype: str) -> None:
+        def _send_bytes(self, status: int, data: bytes, ctype: str, no_cache: bool = False) -> None:
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            if no_cache:
+                # Previews must always show the freshly-built files, never a
+                # stale copy the browser cached from a previous build.
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(data)
 
@@ -213,7 +219,7 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
             ctype = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
             if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
                 ctype += "; charset=utf-8"
-            return self._send_bytes(200, data, ctype)
+            return self._send_bytes(200, data, ctype, no_cache=True)
 
         def do_POST(self):
             if not self._authorized():

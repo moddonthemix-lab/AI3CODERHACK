@@ -142,7 +142,7 @@ async function refresh() {
     $("builds").innerHTML = bl.length ? bl.map(b =>
       `<div class="rev"><span class="sev ${b.ok ? "low" : "high"}">${b.ok ? "PASS" : "FAIL"}</span>${esc(b.task)}` +
       `<span style="color:var(--dim)"> · ${b.attempts} tr${b.attempts === 1 ? "y" : "ies"}</span>` +
-      (b.dir ? ` <a href="/preview?path=${encodeURIComponent(b.dir)}" target="_blank" style="color:var(--accent)">preview ↗</a>` : "") +
+      (b.dir ? ` <a href="/preview?path=${encodeURIComponent(b.dir)}&_=${Date.now()}" target="_blank" style="color:var(--accent)">preview ↗</a>` : "") +
       (b.problem ? `<div class="fix">problem solved: ${esc(b.problem)}</div>` : "") + `</div>`).join("")
       : `<span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span>`;
     const tpls = await api("/api/templates");
@@ -182,7 +182,7 @@ async function build() {
     const r = await api("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, dir }) });
     if (r.error) { $("bout").textContent = "✗ " + r.error; }
     else {
-      const prev = `  <a href="/preview?path=${encodeURIComponent(r.dir)}" target="_blank" style="color:var(--accent)">Open preview ↗</a>`;
+      const prev = `  <a href="/preview?path=${encodeURIComponent(r.dir)}&_=${Date.now()}" target="_blank" style="color:var(--accent)">Open preview ↗</a>`;
       $("bout").innerHTML = esc((r.ok ? "✓ tests pass" : "✗ tests still failing") + " after " + r.attempts +
         " attempt(s) in " + r.dir).replace(/\n/g, "<br>") + prev + "<br><br>" + esc(r.diff || "(no changes)").replace(/\n/g, "<br>");
       refresh();
@@ -218,7 +218,7 @@ async function scaffold(name) {
   try {
     const r = await api("/api/new", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, dir }) });
     if (r.error) { alert("✗ " + r.error); return; }
-    window.open("/preview?path=" + encodeURIComponent(r.dir), "_blank");  // open it right away
+    window.open("/preview?path=" + encodeURIComponent(r.dir) + "&_=" + Date.now(), "_blank");  // open it right away
     refresh();
   } catch (e) { alert("error: " + e); }
 }
