@@ -193,6 +193,19 @@ def test_plain_game_request_injects_the_playable_recipe():
     assert "PLAYABLE" in seen[0] and "index.html" in seen[0]         # the boss didn't have to ask for HTML
 
 
+def test_game_build_starts_from_the_builtin_playable_template():
+    from builder.buildagent import GAME_STARTER_FILES
+    # the template itself is a valid, complete playable game (has canvas, a loop, controls)
+    html = GAME_STARTER_FILES["index.html"]
+    assert "<canvas" in html and "requestAnimationFrame" in html and "addEventListener" in html
+    # a game build with no past solution adapts that working template instead of starting from nothing
+    seen = []
+    propose = make_propose(lambda p: (seen.append(p), 'x\nFILES_JSON: {}')[1], "a snake game",
+                           log=lambda m: None, starter=None)
+    propose({"attempt": 1, "failure": None, "diff": ""})
+    assert "ADAPT them" in seen[0] and "getContext" in seen[0]       # the working template is in the prompt
+
+
 # --------------------------------------------------------------------------- persisted undo
 def test_save_and_restore_backup_across_runs(tmp_path):
     allowed = tmp_path / "Projects"

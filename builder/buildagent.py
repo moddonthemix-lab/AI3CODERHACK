@@ -103,6 +103,78 @@ _KIND_WORDS = {
 }
 
 
+# A complete, PLAYABLE canvas game Builder starts every game build from, so even the small model just
+# adapts working code (change the rules/colors/title) instead of writing a game from scratch. It already
+# runs with no errors and passes the structural test, so a game build can't come out broken.
+GAME_STARTER_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Game</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:sans-serif;text-align:center}
+canvas{background:#000;display:block;margin:12px auto;border:2px solid #333}</style></head>
+<body>
+<h1>Game</h1>
+<p>Arrow keys to move. Eat the red dots.</p>
+<canvas id="game" width="400" height="400"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const SIZE = 20;
+let player = {x: 200, y: 200};
+let food = {x: 100, y: 100};
+let dir = {x: 0, y: 0};
+let score = 0;
+
+function placeFood() {
+  food.x = Math.floor(Math.random() * (canvas.width / SIZE)) * SIZE;
+  food.y = Math.floor(Math.random() * (canvas.height / SIZE)) * SIZE;
+}
+
+function update() {
+  player.x += dir.x;
+  player.y += dir.y;
+  if (player.x < 0) player.x = canvas.width - SIZE;
+  if (player.x >= canvas.width) player.x = 0;
+  if (player.y < 0) player.y = canvas.height - SIZE;
+  if (player.y >= canvas.height) player.y = 0;
+  if (player.x === food.x && player.y === food.y) { score += 1; placeFood(); }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'lime';
+  ctx.fillRect(player.x, player.y, SIZE, SIZE);
+  ctx.fillStyle = 'red';
+  ctx.fillRect(food.x, food.y, SIZE, SIZE);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('Score: ' + score, 10, 20);
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowUp') dir = {x: 0, y: -SIZE};
+  else if (e.key === 'ArrowDown') dir = {x: 0, y: SIZE};
+  else if (e.key === 'ArrowLeft') dir = {x: -SIZE, y: 0};
+  else if (e.key === 'ArrowRight') dir = {x: SIZE, y: 0};
+});
+
+placeFood();
+loop();
+</script>
+</body></html>
+"""
+
+GAME_STARTER_TEST = """def test_game_has_the_essentials():
+    html = open('index.html').read()
+    assert '<canvas' in html
+    assert 'requestAnimationFrame' in html
+    assert 'addEventListener' in html
+    assert 'getContext' in html
+"""
+
+GAME_STARTER_FILES = {"index.html": GAME_STARTER_HTML, "test_game.py": GAME_STARTER_TEST}
+
+
 def classify(task: str) -> str:
     """Guess the kind of project from a plain request, so Builder adds the right build recipe himself."""
     t = " " + task.lower() + " "
@@ -205,6 +277,9 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
     kind = classify(task)
     if kind != "default":
         log(f"  (building this as a {kind} — making it {'playable' if kind == 'game' else 'runnable'} and tested)")
+    # For a game, start from a built-in PLAYABLE template so even a weak model only has to adapt it.
+    if not starter and kind == "game":
+        starter = {"task": "a basic playable arrow-key canvas game", "files": GAME_STARTER_FILES}
     starter_block = ""
     if starter and starter.get("files"):
         files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in starter["files"].items())
