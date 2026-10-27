@@ -152,7 +152,9 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
             if url.path == "/api/brief":
                 is_online = online()
                 with lock:
-                    return self._send(200, brief(store, is_online))
+                    b = brief(store, is_online)
+                b["space"] = (cfg.code_dirs[0] if cfg and cfg.code_dirs else "")
+                return self._send(200, b)
             if url.path == "/v1/models":
                 return self._send(200, {"object": "list", "data": [{"id": MODEL_ID, "object": "model",
                                         "created": 0, "owned_by": "local", "name": CARD["name"]}]})
