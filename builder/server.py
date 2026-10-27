@@ -15,6 +15,7 @@ import email.parser
 import email.policy
 import json
 import re
+import sys
 import threading
 import time
 import uuid
@@ -336,7 +337,17 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
 def serve(store: Store, assistant: Assistant | None, host: str, port: int, token: str = "",
           memory: Memory | None = None, voice=None, web=None) -> None:
     handler = make_handler(store, assistant, token, memory, voice, web)
-    httpd = ThreadingHTTPServer((host, port), handler)
+    try:
+        httpd = ThreadingHTTPServer((host, port), handler)
+    except OSError as e:
+        import errno
+        if e.errno in (errno.EADDRINUSE, 48):
+            print(f"Port {port} is already in use — another app (or an earlier `builder serve`) is on it.\n"
+                  f"  Try another port:   builder serve --port {port + 13}\n"
+                  f"  Or set BUILDER_API_PORT in your .env.\n"
+                  f"  To see what's using it:   lsof -i :{port}", file=sys.stderr)
+            raise SystemExit(1) from None
+        raise
     handler.sync_loop = offline.SyncLoop(handler.catch_up)
     shown = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
     print(f"Builder dashboard: http://{shown}:{port}   ·   API for the family: http://{host}:{port}/api  (Ctrl+C to stop)")
