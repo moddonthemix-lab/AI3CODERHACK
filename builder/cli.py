@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("preview", help="Open a built website/folder in your browser")
     s.add_argument("path", help="a file or folder inside BUILDER_CODE_DIRS")
 
+    sub.add_parser("templates", help="List the ready-made project templates")
+    s = sub.add_parser("new", help="Scaffold a working project from a template instantly (no model)")
+    s.add_argument("kind", help="game | web | api | cli | python (or: website, tool, snake, pong…)")
+    s.add_argument("--dir", required=True, help="project folder (must be inside BUILDER_CODE_DIRS)")
+
     s = sub.add_parser("reviews", help="Security findings Builder has recorded")
     s.add_argument("query", nargs="*")
     s.add_argument("--severity", choices=["high", "med", "low"])
@@ -405,6 +410,24 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_lab(args, config, db)
         elif cmd == "doctor":
             return _cmd_doctor(config, llm)
+        elif cmd == "templates":
+            from .templates import template_names
+            _print_rows(template_names(), ["name", "desc"], 70)
+        elif cmd == "new":
+            from .templates import template_files
+            from .projects import Project, ScopeError
+            try:
+                proj = Project(args.dir, config)
+            except ScopeError as e:
+                print(f"✗ {e}\n  Set BUILDER_CODE_DIRS first (e.g. ~/BuilderSpace).", file=sys.stderr)
+                return 1
+            files = template_files(args.kind)
+            proj.write_all(files)
+            print(f"✓ Created a working '{args.kind}' project in {proj.root}:")
+            for name in files:
+                print(f"    {name}")
+            print(f"\nTry it:  builder preview {args.dir}        (for a game/website)")
+            print(f"Improve it:  builder build \"<what to change>\" --dir {args.dir}")
         elif cmd == "preview":
             import webbrowser
             from .projects import ScopeError, allowed_dirs, check_scope

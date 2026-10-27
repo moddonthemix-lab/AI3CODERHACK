@@ -203,7 +203,7 @@ def test_game_build_starts_from_the_builtin_playable_template():
     propose = make_propose(lambda p: (seen.append(p), 'x\nFILES_JSON: {}')[1], "a snake game",
                            log=lambda m: None, starter=None)
     propose({"attempt": 1, "failure": None, "diff": ""})
-    assert "ADAPT them" in seen[0] and "getContext" in seen[0]       # the working template is in the prompt
+    assert "ADAPT it" in seen[0] and "getContext" in seen[0]       # the working template is in the prompt
 
 
 # --------------------------------------------------------------------------- persisted undo
@@ -254,6 +254,42 @@ def test_problem_signature_pulls_out_the_error():
         .startswith("ModuleNotFoundError")
     assert "AssertionError" in problem_signature(["E   AssertionError: 2 != 3"])
     assert problem_signature([]) == ""
+
+
+def test_every_template_is_a_working_project():
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path as _P
+    from builder.templates import TEMPLATES
+    for kind, t in TEMPLATES.items():
+        d = _P(tempfile.mkdtemp())
+        for name, content in t["files"].items():
+            (d / name).write_text(content, encoding="utf-8")
+        r = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=d, capture_output=True, text=True)
+        assert r.returncode == 0, f"template {kind} does not pass its own test:\n{r.stdout[-400:]}"
+
+
+def test_build_always_lands_a_working_result_even_if_the_model_is_useless(tmp_path):
+    from builder.buildagent import run_build
+
+    class UselessLLM:
+        model = "useless"
+
+        def available(self):
+            return True
+
+        def chat(self, messages, **kw):
+            return {"content": "sorry, I cannot."}      # no FILES_JSON at all
+
+    allowed = tmp_path / "Projects"
+    allowed.mkdir()
+    proj = Project(allowed / "snake", cfg_for(allowed, home=tmp_path))
+    result = run_build("a snake game", proj, UselessLLM(), tries=1)
+    assert result["ok"] is True                           # the working game template was dropped in
+    assert (proj.root / "index.html").exists()
+    html = (proj.root / "index.html").read_text()
+    assert "<canvas" in html and "requestAnimationFrame" in html   # it's a real playable game
 
 
 def test_build_falls_back_to_the_stronger_model(tmp_path):
@@ -322,7 +358,7 @@ def test_reuses_a_past_working_solution_to_build_faster(tmp_path):
     propose = make_propose(lambda p: (seen.append(p), 'ok\nFILES_JSON: {}')[1], "build a pong game",
                            log=lambda m: None, starter=sol)
     propose({"attempt": 1, "failure": None, "diff": ""})
-    assert "ADAPT them" in seen[0] and "index.html" in seen[0]
+    assert "ADAPT it" in seen[0] and "index.html" in seen[0]
 
 
 def test_build_memory_is_recorded_and_recalled(tmp_path):

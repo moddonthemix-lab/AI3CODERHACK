@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import re
 
+from .templates import template_files, template_names  # noqa: F401
+
 FILE_CONTRACT = """
 
 You are writing a small, self-contained project. Reply with:
@@ -103,76 +105,9 @@ _KIND_WORDS = {
 }
 
 
-# A complete, PLAYABLE canvas game Builder starts every game build from, so even the small model just
-# adapts working code (change the rules/colors/title) instead of writing a game from scratch. It already
-# runs with no errors and passes the structural test, so a game build can't come out broken.
-GAME_STARTER_HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Game</title>
-<style>body{margin:0;background:#111;color:#eee;font-family:sans-serif;text-align:center}
-canvas{background:#000;display:block;margin:12px auto;border:2px solid #333}</style></head>
-<body>
-<h1>Game</h1>
-<p>Arrow keys to move. Eat the red dots.</p>
-<canvas id="game" width="400" height="400"></canvas>
-<script>
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const SIZE = 20;
-let player = {x: 200, y: 200};
-let food = {x: 100, y: 100};
-let dir = {x: 0, y: 0};
-let score = 0;
-
-function placeFood() {
-  food.x = Math.floor(Math.random() * (canvas.width / SIZE)) * SIZE;
-  food.y = Math.floor(Math.random() * (canvas.height / SIZE)) * SIZE;
-}
-
-function update() {
-  player.x += dir.x;
-  player.y += dir.y;
-  if (player.x < 0) player.x = canvas.width - SIZE;
-  if (player.x >= canvas.width) player.x = 0;
-  if (player.y < 0) player.y = canvas.height - SIZE;
-  if (player.y >= canvas.height) player.y = 0;
-  if (player.x === food.x && player.y === food.y) { score += 1; placeFood(); }
-}
-
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'lime';
-  ctx.fillRect(player.x, player.y, SIZE, SIZE);
-  ctx.fillStyle = 'red';
-  ctx.fillRect(food.x, food.y, SIZE, SIZE);
-  ctx.fillStyle = '#fff';
-  ctx.font = '16px sans-serif';
-  ctx.fillText('Score: ' + score, 10, 20);
-}
-
-function loop() { update(); draw(); requestAnimationFrame(loop); }
-
-document.addEventListener('keydown', function (e) {
-  if (e.key === 'ArrowUp') dir = {x: 0, y: -SIZE};
-  else if (e.key === 'ArrowDown') dir = {x: 0, y: SIZE};
-  else if (e.key === 'ArrowLeft') dir = {x: -SIZE, y: 0};
-  else if (e.key === 'ArrowRight') dir = {x: SIZE, y: 0};
-});
-
-placeFood();
-loop();
-</script>
-</body></html>
-"""
-
-GAME_STARTER_TEST = """def test_game_has_the_essentials():
-    html = open('index.html').read()
-    assert '<canvas' in html
-    assert 'requestAnimationFrame' in html
-    assert 'addEventListener' in html
-    assert 'getContext' in html
-"""
-
-GAME_STARTER_FILES = {"index.html": GAME_STARTER_HTML, "test_game.py": GAME_STARTER_TEST}
+# Builder starts every game build from this complete, PLAYABLE template (defined in templates.py),
+# so even the small model only has to adapt working code instead of writing a game from scratch.
+GAME_STARTER_FILES = template_files("game")
 
 
 def classify(task: str) -> str:
@@ -233,6 +168,19 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
                                     starter={"task": task, "files": current} if current else starter)
             result = build_and_test(project, propose2, test_cmd=test_cmd, max_tries=tries, log=log)
 
+    # Last-resort guarantee: if neither model could pass, drop in the clean working template for this kind
+    # (or the reused past solution) and ship that — so a build ALWAYS leaves a runnable result.
+    if not result["ok"]:
+        from . import sandbox
+        baseline = starter["files"] if (starter and starter.get("files")) else template_files(classify(task))
+        if baseline:
+            log("  couldn't get the model's version to pass — using a clean working template so you still "
+                "get something that runs.")
+            project.write_all(baseline)
+            test = sandbox.run_tests(project.root, test_cmd)
+            result = {"ok": bool(test.get("ok")), "attempts": result.get("attempts", tries), "test": test,
+                      "diff": project.diff(), "failures": result.get("failures", []), "used_template": True}
+
     if memory is not None:
         try:
             files = {name: project.read(name) for name in project.changed()} if result["ok"] else None
@@ -277,16 +225,16 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
     kind = classify(task)
     if kind != "default":
         log(f"  (building this as a {kind} — making it {'playable' if kind == 'game' else 'runnable'} and tested)")
-    # For a game, start from a built-in PLAYABLE template so even a weak model only has to adapt it.
-    if not starter and kind == "game":
-        starter = {"task": "a basic playable arrow-key canvas game", "files": GAME_STARTER_FILES}
-    starter_block = ""
+    # Every build starts from a WORKING template (a past solution if there's a close one, else the built-in
+    # template for this kind). It's kept as the guaranteed baseline, so a build can't come out empty/broken.
     if starter and starter.get("files"):
-        files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in starter["files"].items())
-        starter_block = (f"\n\nYou already built something similar before ({starter.get('task', '')!r}) and it "
-                         f"PASSED its tests. Here are those working files — ADAPT them to the new task instead "
-                         f"of starting from scratch, keeping what works:\n{files_txt[:8000]}")
-        log("  (reusing a similar project you built before — adapting it instead of starting over)")
+        baseline_files, baseline_task = dict(starter["files"]), starter.get("task", "")
+    else:
+        baseline_files, baseline_task = template_files(kind), f"a working {kind} starter"
+    files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in baseline_files.items())
+    starter_block = (f"\n\nHere is a WORKING starting point ({baseline_task!r}) that already runs and passes "
+                     f"its test — ADAPT it to the task, keeping what works (don't start from scratch):\n{files_txt[:8000]}")
+    log("  (starting from a working template and adapting it)")
 
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
@@ -302,5 +250,10 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
         summary, files = files_from_reply(generate(prompt))
         if summary:
             log(f"  model: {summary.splitlines()[0][:100]}")
+        # If the model gave nothing usable on the first draft, write the working template so the build still
+        # produces a runnable result instead of "(no changes)".
+        if not files and not ctx.get("failure"):
+            log("  (model gave nothing usable — using the working template so you still get a result)")
+            return dict(baseline_files)
         return files
     return propose
