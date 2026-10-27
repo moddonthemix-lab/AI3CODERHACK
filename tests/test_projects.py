@@ -159,9 +159,11 @@ def test_make_propose_feeds_failure_back_to_the_model():
 
     propose = make_propose(generate, "build a thing", log=lambda m: None)
     first = propose({"attempt": 1, "failure": None, "diff": ""})
-    second = propose({"attempt": 2, "failure": "AssertionError: boom", "diff": ""})
+    second = propose({"attempt": 2, "failure": "AssertionError: boom", "diff": "",
+                      "files": {"app.py": "ok=0\n"}})
     assert first == {"app.py": "ok=0\n"} and second == {"app.py": "ok=1\n"}
     assert "FAILING" in seen[1] and "boom" in seen[1]                # the error output is given to the model
+    assert "ok=0" in seen[1] and "app.py" in seen[1]                 # ...along with his current code, so he edits it
 
 
 def test_builder_picks_the_project_shape_from_a_plain_request():

@@ -122,9 +122,11 @@ def make_propose(generate, task: str, log=print, memory_note: str = ""):
 
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
-            prompt = (f"Task: {task}{note}\n\nYour code's tests are FAILING. Here is the output:\n\n"
-                      f"{ctx['failure'][:6000]}\n\nFix the code (and tests if wrong) and return the full files."
-                      + contract)
+            current = "".join(f"\n=== {name} ===\n{content}\n" for name, content in (ctx.get("files") or {}).items())
+            prompt = (f"Task: {task}{note}\n\nHere are the files you wrote so far:\n{current[:9000]}\n\n"
+                      f"Their tests are FAILING. Here is the test output:\n\n{ctx['failure'][:6000]}\n\n"
+                      f"Find the actual cause, change ONLY what's needed to fix it, and return the full "
+                      f"updated files (keep the parts that already work)." + contract)
             log(f"  asking the coder model to fix attempt {ctx['attempt'] - 1}'s failures…")
         else:
             prompt = f"Task: {task}{note}" + contract

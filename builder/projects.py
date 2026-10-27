@@ -164,7 +164,8 @@ def build_and_test(project: Project, propose, test_cmd=None, run=None, max_tries
     result = {"ok": False, "attempts": 0, "test": None, "diff": "", "failures": []}
     failure, failures = None, []
     for attempt in range(1, max_tries + 1):
-        files = propose({"attempt": attempt, "failure": failure, "diff": project.diff()})
+        current = {name: project.read(name) for name in project.changed()}   # what he wrote so far
+        files = propose({"attempt": attempt, "failure": failure, "diff": project.diff(), "files": current})
         if files:
             project.write_all(files)
         test = run(project.root, test_cmd)
