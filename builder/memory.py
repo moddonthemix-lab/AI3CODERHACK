@@ -37,9 +37,30 @@ class Memory:
             return None
         return self.db.add_review(issue, severity, fix, topic)
 
-    def remember_build(self, task: str, dir: str, ok: bool, attempts: int, problem: str = "") -> int:
-        """Record a finished build (and the problem it had to solve) so Builder learns from his projects."""
-        return self.db.add_build(task, dir, ok, attempts, problem)
+    def remember_build(self, task: str, dir: str, ok: bool, attempts: int, problem: str = "",
+                       files: dict | None = None) -> int:
+        """Record a finished build; when it passed, save the working files so he can reuse them next time."""
+        import json
+        blob = json.dumps(files) if (ok and files) else ""
+        return self.db.add_build(task, dir, ok, attempts, problem, blob)
+
+    def recall_solution(self, task: str) -> dict | None:
+        """The closest PAST build that passed, as {task, files} — so a similar new build adapts instead of starting over."""
+        import json
+        best, best_score = None, 0
+        tw = _words(task)
+        if not tw:
+            return None
+        for b in self.db.passed_builds_with_files():
+            score = len(tw & _words(b["task"]))
+            if score > best_score:
+                try:
+                    files = json.loads(b["files"])
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(files, dict) and files:
+                    best, best_score = {"task": b["task"], "files": files}, score
+        return best if best_score >= 1 else None
 
     # ------------------------------------------------------------------ recall
     def recall(self, task: str, limit: int = 6) -> dict:
@@ -85,8 +106,10 @@ _STOP = {"with", "that", "this", "from", "your", "have", "into", "will", "make",
          "file", "test", "tests", "app", "page", "using", "small", "simple", "build"}
 
 
-def _overlaps(a: str, b: str, need: int = 2) -> bool:
+def _words(text: str) -> set[str]:
     import re
-    wa = {w for w in re.findall(r"[a-z]{4,}", a.lower())} - _STOP
-    wb = {w for w in re.findall(r"[a-z]{4,}", b.lower())} - _STOP
-    return len(wa & wb) >= need
+    return {w for w in re.findall(r"[a-z]{4,}", text.lower())} - _STOP
+
+
+def _overlaps(a: str, b: str, need: int = 2) -> bool:
+    return len(_words(a) & _words(b)) >= need

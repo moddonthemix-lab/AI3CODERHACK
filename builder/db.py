@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS builds (
     ok          INTEGER NOT NULL DEFAULT 0,     -- 1 = tests passed
     attempts    INTEGER NOT NULL DEFAULT 1,
     problem     TEXT NOT NULL DEFAULT '',       -- the error he hit (and solved, if ok) — a short signature
+    files       TEXT NOT NULL DEFAULT '',       -- JSON of the working files when it passed, to reuse/adapt next time
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -129,6 +130,14 @@ class Store:
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Small, additive upgrades for databases created before a column existed."""
+        have = {r["name"] for r in self.conn.execute("PRAGMA table_info(builds)")}
+        if "files" not in have:
+            with self.conn:
+                self.conn.execute("ALTER TABLE builds ADD COLUMN files TEXT NOT NULL DEFAULT ''")
 
     def close(self) -> None:
         self.conn.close()
@@ -177,9 +186,15 @@ class Store:
         return _rows(self.conn.execute(sql, params))
 
     # ------------------------------------------------------------------ build memory
-    def add_build(self, task: str, dir: str = "", ok: bool = False, attempts: int = 1, problem: str = "") -> int:
-        return self._insert("INSERT INTO builds(task, dir, ok, attempts, problem) VALUES (?, ?, ?, ?, ?)",
-                            (task, dir, 1 if ok else 0, attempts, problem[:500]))
+    def add_build(self, task: str, dir: str = "", ok: bool = False, attempts: int = 1, problem: str = "",
+                  files: str = "") -> int:
+        return self._insert("INSERT INTO builds(task, dir, ok, attempts, problem, files) VALUES (?, ?, ?, ?, ?, ?)",
+                            (task, dir, 1 if ok else 0, attempts, problem[:500], files))
+
+    def passed_builds_with_files(self, limit: int = 40) -> list[dict]:
+        """Recent builds that PASSED and saved their working files — the pool to reuse/adapt from."""
+        return _rows(self.conn.execute(
+            "SELECT * FROM builds WHERE ok = 1 AND files != '' ORDER BY id DESC LIMIT ?", (limit,)))
 
     def builds(self, query: str = "", limit: int = 20) -> list[dict]:
         if query.strip():

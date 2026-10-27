@@ -123,13 +123,14 @@ def files_from_reply(text: str) -> tuple[str, dict[str, str]]:
     return summary, files
 
 
-def make_propose(generate, task: str, log=print, memory_note: str = ""):
+def make_propose(generate, task: str, log=print, memory_note: str = "", starter: dict | None = None):
     """Build a ``propose(ctx)`` for ``build_and_test`` from a ``generate(prompt) -> text`` function.
 
     ``generate`` is anything that answers a prompt (the local Ollama coder model, or the family brain).
     The first call writes the project; later calls carry the failing test output so the model can fix it.
     ``memory_note`` (what Builder remembers — the boss's stack, past fixes, lessons) is included so his
-    work benefits from memory even offline.
+    work benefits from memory even offline. ``starter`` is the working files from a similar past build, so
+    he ADAPTS proven code instead of starting from scratch — faster and more reliable.
     """
     note = (f"\n\nWhat you remember (apply it):\n{memory_note}\n" if memory_note else "")
     recipe = recipe_for(task)          # Builder works out the right project shape from the plain request
@@ -137,6 +138,13 @@ def make_propose(generate, task: str, log=print, memory_note: str = ""):
     kind = classify(task)
     if kind != "default":
         log(f"  (building this as a {kind} — making it {'playable' if kind == 'game' else 'runnable'} and tested)")
+    starter_block = ""
+    if starter and starter.get("files"):
+        files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in starter["files"].items())
+        starter_block = (f"\n\nYou already built something similar before ({starter.get('task', '')!r}) and it "
+                         f"PASSED its tests. Here are those working files — ADAPT them to the new task instead "
+                         f"of starting from scratch, keeping what works:\n{files_txt[:8000]}")
+        log("  (reusing a similar project you built before — adapting it instead of starting over)")
 
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
@@ -147,7 +155,7 @@ def make_propose(generate, task: str, log=print, memory_note: str = ""):
                       f"updated files (keep the parts that already work)." + contract)
             log(f"  asking the coder model to fix attempt {ctx['attempt'] - 1}'s failures…")
         else:
-            prompt = f"Task: {task}{note}" + contract
+            prompt = f"Task: {task}{note}{starter_block}" + contract
             log("  asking the coder model to write the project…")
         summary, files = files_from_reply(generate(prompt))
         if summary:

@@ -217,25 +217,31 @@ def _cmd_build(args, config, llm, memory=None) -> int:
         return llm.chat([{"role": "system", "content": _BUILD_SYSTEM},
                          {"role": "user", "content": prompt}]).get("content", "")
 
-    memory_note = ""
+    memory_note, starter = "", None
     if memory is not None:
         try:
             memory_note = memory.as_prompt(memory.recall(task), max_chars=1500)
         except Exception:  # noqa: BLE001 — memory is a help, never a blocker
             memory_note = ""
+        try:
+            starter = memory.recall_solution(task)   # a similar past build that passed, to adapt from
+        except Exception:  # noqa: BLE001
+            starter = None
     if memory_note:
         err("  (using what I remember about your stack and past fixes)")
 
     test_cmd = args.test.split() if args.test else None
-    propose = make_propose(generate, task, log=err, memory_note=memory_note)
+    propose = make_propose(generate, task, log=err, memory_note=memory_note, starter=starter)
     result = build_and_test(proj, propose, test_cmd=test_cmd, max_tries=args.tries, log=err)
     save_backup(proj, backup_path)
 
-    # Remember this build — and the problem he hit — so he learns from his projects over time.
+    # Remember this build — and the working files when it passed — so he reuses/adapts them next time.
     if memory is not None:
         try:
+            from .projects import Project  # noqa: F401 (kept local)
+            files = {name: proj.read(name) for name in proj.changed()} if result["ok"] else None
             problem = problem_signature(result.get("failures", []))
-            memory.remember_build(task, str(proj.root), result["ok"], result["attempts"], problem)
+            memory.remember_build(task, str(proj.root), result["ok"], result["attempts"], problem, files=files)
         except Exception:  # noqa: BLE001 — recording must never fail a build
             pass
 

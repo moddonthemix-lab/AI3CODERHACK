@@ -243,6 +243,29 @@ def test_problem_signature_pulls_out_the_error():
     assert problem_signature([]) == ""
 
 
+def test_reuses_a_past_working_solution_to_build_faster(tmp_path):
+    from builder.db import Store
+    from builder.memory import Memory
+    db = Store()
+    mem = Memory(db, None, Config(home=tmp_path, code_dirs=[str(tmp_path)]))
+    # a past pong build that PASSED, with its working files saved
+    mem.remember_build("a retro pong game", str(tmp_path), ok=True, attempts=2,
+                       files={"index.html": "<canvas>…pong…</canvas>", "pong.py": "def move(): ..."})
+    # a FAILED build saves no files (nothing to reuse)
+    mem.remember_build("a broken thing", str(tmp_path), ok=False, attempts=3, problem="boom", files={"x": "y"})
+
+    sol = mem.recall_solution("make a pong game for me")       # similar task -> finds the working pong
+    assert sol and "index.html" in sol["files"]
+    assert mem.recall_solution("a spreadsheet budget tracker") is None   # unrelated -> nothing to reuse
+
+    # and that starter code is handed to the model on the first draft, so he adapts instead of starting over
+    seen = []
+    propose = make_propose(lambda p: (seen.append(p), 'ok\nFILES_JSON: {}')[1], "build a pong game",
+                           log=lambda m: None, starter=sol)
+    propose({"attempt": 1, "failure": None, "diff": ""})
+    assert "ADAPT them" in seen[0] and "index.html" in seen[0]
+
+
 def test_build_memory_is_recorded_and_recalled(tmp_path):
     from builder.db import Store
     from builder.memory import Memory
