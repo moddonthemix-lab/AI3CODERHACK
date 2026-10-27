@@ -33,18 +33,31 @@ This runs in a HEADLESS sandbox with NO internet, NO new packages, and a short t
   connection, and WITHOUT running the main loop.
 - For a GAME or a WEBSITE, prefer a SINGLE self-contained .html file (canvas/JS) for what the user runs,
   AND a small testable .py (or the pure logic) with a pytest test. Keep the drawing/animation out of the
-  tested part."""
+  tested part.
+
+NEVER ship stubs or broken tests — this is the most common reason a build fails:
+- Fully implement every function. Do NOT leave `pass`, `...`, `TODO`, or an empty body anywhere.
+- Tests must use CONCRETE values and call functions with real arguments. Do NOT reference an undefined
+  name (like `expected_result`), and do NOT give a test function parameters unless you define that pytest
+  fixture yourself. A plain test is: `def test_x():` then set up real values and `assert`.
+- In HTML/JS, DECLARE every variable before you use it (e.g. the food/target position), so the page runs
+  with no ReferenceError when opened."""
 
 
 # Builder works out the right shape of project from a plain request, so the boss doesn't have to spell out
 # "single HTML file, canvas, with a test" every time. Each kind adds concrete, buildable-and-testable specs.
 RECIPES = {
     "game": (
-        "\n\nThis is a GAME — make it actually PLAYABLE, not just logic:\n"
+        "\n\nThis is a GAME — make it actually PLAYABLE, and keep it simple to verify:\n"
         "- index.html: ONE self-contained file (inline CSS + JS, a <canvas>), keyboard/mouse controls, an\n"
-        "  on-screen score, and a game loop with requestAnimationFrame. It must run by just opening the file.\n"
-        "- logic.py: the pure rules (move, collision, score) as plain functions.\n"
-        "- test_logic.py: a pytest test that imports logic.py and checks those functions (no window)."),
+        "  on-screen score, and a game loop with requestAnimationFrame. DECLARE every variable before using\n"
+        "  it (the snake, the food/target, the score) so it runs with NO errors when opened. This is the\n"
+        "  thing the user plays — make it complete and fun.\n"
+        "- test_game.py: a SIMPLE pytest test that opens index.html as TEXT and asserts it contains the\n"
+        "  essentials — e.g. `html = open('index.html').read()` then `assert '<canvas' in html`,\n"
+        "  `assert 'requestAnimationFrame' in html`, `assert 'addEventListener' in html`. Use plain\n"
+        "  `def test_...()` functions with no parameters. Do NOT import the HTML, run the game, or write a\n"
+        "  separate logic.py — the single playable index.html plus this structural test is all you need."),
     "web": (
         "\n\nThis is a WEBSITE/PAGE — make it viewable:\n"
         "- index.html: ONE self-contained file with inline CSS (and JS if needed). It must look right when\n"
