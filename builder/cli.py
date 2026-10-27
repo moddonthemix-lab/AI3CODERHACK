@@ -369,6 +369,18 @@ def _cmd_doctor(config, llm) -> int:
         line(r["ok"] and "sandbox-ok" in r["stdout"], "sandbox runs code", "no network, writes only in its own folder")
     except Exception as e:  # noqa: BLE001
         line(False, "sandbox runs code", str(e))
+    # Prove the whole build-and-test pipeline works on this machine (with pytest OR the built-in runner).
+    try:
+        import tempfile
+        from .templates import template_files
+        d = Path(tempfile.mkdtemp())
+        for name, content in template_files("default").items():
+            (d / name).write_text(content, encoding="utf-8")
+        r = sandbox.run_tests(d, allow_network=True)
+        runner = "pytest" if sandbox._pytest_available() else "built-in runner (no pytest needed)"
+        line(r["ok"], "build-and-test pipeline", f"tests run and pass via {runner}")
+    except Exception as e:  # noqa: BLE001
+        line(False, "build-and-test pipeline", str(e))
     dirs = config.code_dirs
     if not dirs:
         line(False, "allowed code folders (BUILDER_CODE_DIRS)",

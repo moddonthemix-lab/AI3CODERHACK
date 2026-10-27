@@ -138,14 +138,25 @@ Every endpoint stays inside the scope and the gates above.
 
 | Command | What it does |
 |---|---|
+| `builder new <kind> --dir <folder>` | Scaffold a working project instantly from a template (game, web, api, cli, python) — no model, never fails |
+| `builder templates` | List the ready-made templates (built-in + your saved ones) |
+| `builder save-template <name> --dir <folder>` | Save a folder you built as your own reusable template |
 | `builder build "<task>" --dir <folder>` | Write a project, run its tests, fix failures, show the diff (`--undo` to restore) |
+| `builder preview <folder>` | Open a built website/game in your browser |
 | `builder review <path>` | Defensive audit of your own code/config — findings with severity + fix |
+| `builder reviews` / `builder builds` | What he's found / what he's built (and remembers) |
 | `builder lab status\|on\|off\|log` | Authorized-lab mode and its audit log |
-| `builder doctor` | Check Ollama, the coder models, the sandbox and the code-folder scope |
+| `builder doctor` | Check Ollama, the models, the sandbox, the build-and-test pipeline, and the code-folder scope |
 | `builder bench` | Measure models on this machine and pick the best coder model |
+| `builder feedback "<lesson>"` / `builder remember "<note>"` | Teach him — he applies it to every build (offline) |
 | `builder chat` | Talk to Builder in the terminal |
 | `builder serve` | Start the HTTP API + dashboard |
 | `builder hub --check` | See whether the family cloud brain is ready (☁️ / 🏠) |
+
+**Reliability:** every build starts from a working template and keeps it as a guaranteed fallback, so a
+build always produces a runnable result. Builder uses the fast model first and falls back to the stronger
+one if needed. Tests run via pytest when it's installed, otherwise a built-in runner — so `pip install -e .`
+is enough; pytest is optional.
 
 Configuration is all optional — see `.env.example`. Builder's variables are `BUILDER_*`; the old
 `SCHOLAR_*` names still work as a fallback.

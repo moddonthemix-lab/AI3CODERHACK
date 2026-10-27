@@ -39,6 +39,9 @@ This runs in a HEADLESS sandbox with NO internet, NO new packages, and a short t
 
 NEVER ship stubs or broken tests — this is the most common reason a build fails:
 - Fully implement every function. Do NOT leave `pass`, `...`, `TODO`, or an empty body anywhere.
+- Tests use ONLY the standard library + plain `assert`. NEVER import selenium, playwright, pytest
+  plugins, requests, or any third-party package in a test — a missing import fails the whole run. To
+  check an HTML file, open it as text and assert on the string; do not launch a browser.
 - Tests must use CONCRETE values and call functions with real arguments. Do NOT reference an undefined
   name (like `expected_result`), and do NOT give a test function parameters unless you define that pytest
   fixture yourself. A plain test is: `def test_x():` then set up real values and `assert`.
