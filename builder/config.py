@@ -31,8 +31,15 @@ def load_env(path: str = ".env") -> None:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            key, value = key.strip(), value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
+            key, value = key.strip(), value.strip()
+            if value[:1] in ("'", '"'):                 # quoted value: take what's inside the quotes
+                end = value.find(value[0], 1)
+                value = value[1:end] if end != -1 else value[1:]
+            else:                                        # strip an inline "  # comment", then whitespace
+                value = value.split(" #", 1)[0].split("\t#", 1)[0].strip()
+                if value.startswith("#"):
+                    value = ""
+            if key and value and key not in os.environ:  # empty settings fall through to the profile defaults
                 os.environ[key] = value
         return
 
@@ -64,8 +71,16 @@ def _p(key: str, env: str):
     return lambda: _env(env) or _profile()[key]
 
 
+def _toint(value, default: int) -> int:
+    """Parse an int from an env value, falling back to the default if it's blank or malformed."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def _p_int(key: str, env: str):
-    return lambda: int(_env(env) or _profile()[key])
+    return lambda: _toint(_env(env), _profile()[key])
 
 
 def _default_home() -> Path:
@@ -98,7 +113,7 @@ class Config:
     # Strongly recommended on 16GB machines; 0 lets Ollama keep several loaded (32GB+ machines).
     one_model_at_a_time: bool = field(default_factory=lambda: _env("ONE_MODEL", "1").lower()
                                       not in ("0", "false", "no"))
-    llm_timeout: int = field(default_factory=lambda: int(_env("LLM_TIMEOUT", "900")))
+    llm_timeout: int = field(default_factory=lambda: _toint(_env("LLM_TIMEOUT"), 900))
     assistant_name: str = field(default_factory=lambda: _env("NAME", "Builder"))
     user_name: str = field(default_factory=lambda: _env("USER", "boss"))
     # Never touch the internet (Builder also notices on his own when it's down)
@@ -113,14 +128,14 @@ class Config:
     qdrant_url: str = field(default_factory=lambda: _env("QDRANT_URL"))
     qdrant_api_key: str = field(default_factory=lambda: _env("QDRANT_API_KEY"))
     # Sandbox for running snippets / a project's own tests
-    sandbox_timeout: int = field(default_factory=lambda: int(_env("SANDBOX_TIMEOUT", "60")))
+    sandbox_timeout: int = field(default_factory=lambda: _toint(_env("SANDBOX_TIMEOUT"), 60))
     # Voice (optional extras): Whisper to listen; Piper, macOS `say` or espeak-ng to speak
     whisper_model: str = field(default_factory=_p("whisper", "WHISPER_MODEL"))
     piper_voice: str = field(default_factory=lambda: _env("PIPER_VOICE"))
     say_voice: str = field(default_factory=lambda: _env("SAY_VOICE", "Daniel"))
     # HTTP API (how the rest of the family reaches Builder) — port 8767 (Amo 8765, Scholar 8766)
     api_host: str = field(default_factory=lambda: _env("API_HOST", "127.0.0.1"))
-    api_port: int = field(default_factory=lambda: int(_env("API_PORT", "8767")))
+    api_port: int = field(default_factory=lambda: _toint(_env("API_PORT"), 8767))
     api_token: str = field(default_factory=lambda: _env("API_TOKEN"))
     # --- Builder: coding & security scope (enforced by the sandbox and the security gates) ---
     # The ONLY folders Builder may read or write. Comma-separated; empty means "nothing until the boss sets it".
