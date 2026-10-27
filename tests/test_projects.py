@@ -286,6 +286,24 @@ def test_every_template_is_a_working_project():
         assert r.returncode == 0, f"template {kind} does not pass its own test:\n{r.stdout[-400:]}"
 
 
+def test_drops_files_that_import_missing_libraries():
+    from builder.buildagent import _usable_files, make_propose
+    files = {"index.html": "<canvas></canvas>", "test_game.py": "def test_x():\n    assert 1",
+             "app.py": "from selenium import webdriver\n", "test_app.py": "import pygame\n"}
+    kept, dropped = _usable_files(files)
+    assert set(kept) == {"index.html", "test_game.py"}              # selenium/pygame files dropped
+    assert {m for _, m in dropped} == {"selenium", "pygame"}
+    # a local sibling import is NOT dropped
+    k2, _ = _usable_files({"app.py": "x=1\n", "test_app.py": "from app import x\n"})
+    assert set(k2) == {"app.py", "test_app.py"}
+    # through propose: the model's good files are kept, the bad ones stripped
+    reply = ('ok\nFILES_JSON: {"index.html": "<canvas></canvas>", "test_game.py": "def test_x():\\n assert 1",'
+             ' "test_app.py": "from selenium import webdriver"}')
+    propose = make_propose(lambda p: reply, "a snake game", log=lambda m: None)
+    out = propose({"attempt": 1, "failure": None, "diff": ""})
+    assert "test_app.py" not in out and "index.html" in out
+
+
 def test_build_always_lands_a_working_result_even_if_the_model_is_useless(tmp_path):
     from builder.buildagent import run_build
 

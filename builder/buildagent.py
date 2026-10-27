@@ -130,6 +130,44 @@ BUILD_SYSTEM = (
     "network or files outside the project. If something is unsafe or unclear, you say so instead of guessing.")
 
 
+def _imported_modules(content: str) -> set[str]:
+    """Top-level module names a Python file imports (best effort)."""
+    import ast
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return set()
+    mods = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                mods.add(a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            mods.add(node.module.split(".")[0])
+    return mods
+
+
+def _usable_files(files: dict) -> tuple[dict, list]:
+    """Drop any .py file that imports a library that isn't installed (e.g. selenium, pygame, flask) — the
+    small model keeps ignoring 'standard library only', and one bad import fails the whole test run."""
+    import importlib.util
+    import sys
+    local = {name.rsplit("/", 1)[-1][:-3] for name in files if name.endswith(".py")}
+    stdlib = getattr(sys, "stdlib_module_names", set())
+    kept, dropped = {}, []
+    for path, content in files.items():
+        if not path.endswith(".py"):
+            kept[path] = content
+            continue
+        bad = [m for m in _imported_modules(content)
+               if m not in local and m not in stdlib and importlib.util.find_spec(m) is None]
+        if bad:
+            dropped.append((path, bad[0]))
+        else:
+            kept[path] = content
+    return kept, dropped
+
+
 def _generator(llm):
     """A prompt -> text function backed by an Ollama client."""
     def gen(prompt: str) -> str:
@@ -250,8 +288,13 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
         summary, files = files_from_reply(generate(prompt))
         if summary:
             log(f"  model: {summary.splitlines()[0][:100]}")
-        # If the model gave nothing usable on the first draft, write the working template so the build still
-        # produces a runnable result instead of "(no changes)".
+        # Drop files that import libraries that aren't installed (selenium, pygame, flask, …) — the model
+        # keeps ignoring "standard library only", and one bad import fails the whole test run.
+        files, dropped = _usable_files(files)
+        for path, mod in dropped:
+            log(f"  dropped {path}: it imports '{mod}', which isn't installed (standard library only).")
+        # If nothing usable is left on the first draft, write the working template (run_build's last-resort
+        # also drops in the full template if the model's version never passes).
         if not files and not ctx.get("failure"):
             log("  (model gave nothing usable — using the working template so you still get a result)")
             return dict(baseline_files)
