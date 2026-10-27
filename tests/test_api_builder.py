@@ -48,3 +48,27 @@ def test_review_endpoint_scans_in_scope_and_refuses_outside(tmp_path):
         assert status2 == 403                                      # a path outside the allowed folders is refused
     finally:
         httpd.shutdown()
+
+
+def test_preview_serves_a_built_site_in_scope_and_refuses_outside(tmp_path):
+    import urllib.request
+    allowed = tmp_path / "Projects"
+    site = allowed / "site"
+    site.mkdir(parents=True)
+    (site / "index.html").write_text("<h1>My Site</h1>", encoding="utf-8")
+    cfg = Config(home=tmp_path, code_dirs=[str(allowed)])
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(Store(cfg.db_path), FakeAssistant(cfg), token=""))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with urllib.request.urlopen(base + "/preview?path=" + str(site)) as r:  # a folder -> its index.html
+            assert r.status == 200 and b"My Site" in r.read()
+            assert r.headers.get("Content-Type", "").startswith("text/html")
+        try:
+            urllib.request.urlopen(base + "/preview?path=/etc/hosts")
+            raise AssertionError("expected 403")
+        except urllib.error.HTTPError as e:
+            assert e.code == 403                                   # outside the workspace -> refused
+    finally:
+        httpd.shutdown()

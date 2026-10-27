@@ -80,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="Check Ollama, the coder models, the sandbox and the code-folder scope")
 
+    s = sub.add_parser("preview", help="Open a built website/folder in your browser")
+    s.add_argument("path", help="a file or folder inside BUILDER_CODE_DIRS")
+
     s = sub.add_parser("reviews", help="Security findings Builder has recorded")
     s.add_argument("query", nargs="*")
     s.add_argument("--severity", choices=["high", "med", "low"])
@@ -423,6 +426,25 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_lab(args, config, db)
         elif cmd == "doctor":
             return _cmd_doctor(config, llm)
+        elif cmd == "preview":
+            import webbrowser
+            from .projects import ScopeError, allowed_dirs, check_scope
+            try:
+                p = check_scope(args.path, allowed_dirs(config))
+            except ScopeError as e:
+                print(f"✗ {e}", file=sys.stderr)
+                return 1
+            if p.is_dir():
+                idx = p / "index.html"
+                if not idx.exists():
+                    htmls = sorted(p.glob("*.html"))
+                    idx = htmls[0] if htmls else idx
+                p = idx
+            if not p.exists():
+                print(f"✗ nothing to preview at {args.path} (no index.html / .html file)", file=sys.stderr)
+                return 1
+            print(f"opening {p} in your browser…")
+            webbrowser.open(p.as_uri())
         elif cmd == "reviews":
             _print_rows(db.reviews(" ".join(args.query), args.severity, 50),
                         ["id", "severity", "topic", "issue", "fix"], 60)

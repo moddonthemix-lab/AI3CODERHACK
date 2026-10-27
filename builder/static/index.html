@@ -123,6 +123,7 @@ async function refresh() {
     $("builds").innerHTML = bl.length ? bl.map(b =>
       `<div class="rev"><span class="sev ${b.ok ? "low" : "high"}">${b.ok ? "PASS" : "FAIL"}</span>${esc(b.task)}` +
       `<span style="color:var(--dim)"> · ${b.attempts} tr${b.attempts === 1 ? "y" : "ies"}</span>` +
+      (b.dir ? ` <a href="/preview?path=${encodeURIComponent(b.dir)}" target="_blank" style="color:var(--accent)">preview ↗</a>` : "") +
       (b.problem ? `<div class="fix">problem solved: ${esc(b.problem)}</div>` : "") + `</div>`).join("")
       : `<span class="empty">none yet — run <code>builder build "…" --dir ~/Projects/x</code></span>`;
   } catch (e) {
@@ -151,8 +152,9 @@ async function build() {
     const r = await api("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, dir }) });
     if (r.error) { $("bout").textContent = "✗ " + r.error; }
     else {
-      $("bout").textContent = (r.ok ? "✓ tests pass" : "✗ tests still failing") + " after " + r.attempts +
-        " attempt(s) in " + r.dir + "\n\n" + (r.diff || "(no changes)");
+      const prev = `  <a href="/preview?path=${encodeURIComponent(r.dir)}" target="_blank" style="color:var(--accent)">Open preview ↗</a>`;
+      $("bout").innerHTML = esc((r.ok ? "✓ tests pass" : "✗ tests still failing") + " after " + r.attempts +
+        " attempt(s) in " + r.dir).replace(/\n/g, "<br>") + prev + "<br><br>" + esc(r.diff || "(no changes)").replace(/\n/g, "<br>");
       refresh();
     }
   } catch (e) { $("bout").textContent = "error: " + e; }

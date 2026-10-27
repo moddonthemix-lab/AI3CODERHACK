@@ -178,7 +178,37 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                     return self._send(200, store.pending(qs.get("all") in ("1", "true")))
                 if url.path == "/api/lab":
                     return self._send(200, {"targets": store.lab_targets(True), "log": store.safety_events(20)})
+            if url.path == "/preview":
+                return self._preview(qs.get("path", ""))
             self._send(404, {"error": "not found"})
+
+        def _preview(self, path: str):
+            """Serve a built static site/file from inside Builder's allowed folders (read-only, scope-checked)."""
+            import mimetypes
+            from pathlib import Path as _P
+            from .projects import ScopeError, allowed_dirs, check_scope
+            if cfg is None:
+                return self._send(503, {"error": "no workspace configured"})
+            try:
+                p = check_scope(path, allowed_dirs(cfg))
+            except ScopeError as e:
+                return self._send(403, {"error": str(e)})
+            if p.is_dir():                          # a folder -> open its index.html, or the only .html in it
+                idx = p / "index.html"
+                if not idx.exists():
+                    htmls = sorted(p.glob("*.html"))
+                    idx = htmls[0] if htmls else idx
+                p = idx
+            if not p.exists() or not p.is_file():
+                return self._send(404, {"error": f"nothing to preview at {path} (no index.html / .html file)"})
+            try:
+                data = p.read_bytes()
+            except OSError as e:
+                return self._send(500, {"error": str(e)})
+            ctype = mimetypes.guess_type(str(p))[0] or "application/octet-stream"
+            if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
+                ctype += "; charset=utf-8"
+            return self._send_bytes(200, data, ctype)
 
         def do_POST(self):
             if not self._authorized():

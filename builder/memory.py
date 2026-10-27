@@ -51,8 +51,12 @@ class Memory:
             if l["id"] not in seen:
                 seen.add(l["id"])
                 lessons.append({"id": l["id"], "kind": l["kind"], "text": l["text"]})
-        return {"lessons": lessons[:limit + 4], "reviews": self.db.reviews(task, limit=limit),
-                "builds": self.db.builds(task, limit=4)}
+        # Reviews and builds surface on ANY shared keyword (a single strong word like "flask" is enough).
+        reviews = [r for r in self.db.reviews(limit=60)
+                   if _overlaps(task, r["issue"] + " " + r.get("fix", "") + " " + r.get("topic", ""), need=1)][:limit]
+        builds = [b for b in self.db.builds(limit=60)
+                  if _overlaps(task, b["task"] + " " + b.get("problem", ""), need=1)][:4]
+        return {"lessons": lessons[:limit + 4], "reviews": reviews, "builds": builds}
 
     @staticmethod
     def as_prompt(mem: dict, max_chars: int = 2000) -> str:
@@ -77,8 +81,12 @@ class Memory:
 ResearchMemory = Memory
 
 
+_STOP = {"with", "that", "this", "from", "your", "have", "into", "will", "make", "want", "need", "code",
+         "file", "test", "tests", "app", "page", "using", "small", "simple", "build"}
+
+
 def _overlaps(a: str, b: str, need: int = 2) -> bool:
     import re
-    wa = {w for w in re.findall(r"[a-z]{4,}", a.lower())}
-    wb = {w for w in re.findall(r"[a-z]{4,}", b.lower())}
+    wa = {w for w in re.findall(r"[a-z]{4,}", a.lower())} - _STOP
+    wb = {w for w in re.findall(r"[a-z]{4,}", b.lower())} - _STOP
     return len(wa & wb) >= need
