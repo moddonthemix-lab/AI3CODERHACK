@@ -88,7 +88,17 @@ def _limits(cpu_seconds: int, mem_mb: int):
 
 def _wrapper(workdir: Path) -> list[str]:
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-        return ["sandbox-exec", "-p", MAC_PROFILE.format(work=str(workdir.resolve()))]
+        prefix = ["sandbox-exec", "-p", MAC_PROFILE.format(work=str(workdir.resolve()))]
+        # sandbox-exec is deprecated and errors on recent macOS; only use it if it can actually run a
+        # process, so a broken sandbox never makes correct code look like a failing test.
+        try:
+            probe = subprocess.run([*prefix, sys.executable, "-c", "pass"], cwd=str(workdir),
+                                   capture_output=True, timeout=20)
+            if probe.returncode == 0:
+                return prefix
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return []  # fall back to a normal run (network isolation is best-effort; the file-scope gate still holds)
     if sys.platform.startswith("linux") and shutil.which("unshare"):
         probe = subprocess.run(["unshare", "-rn", "true"], capture_output=True)
         if probe.returncode == 0:
@@ -181,21 +191,37 @@ def run_tests(project_dir: Path, cmd: list[str] | None = None, timeout: int = 18
     if not cmd:
         return {"ok": False, "exit_code": None, "stdout": "", "cmd": None, "timed_out": False,
                 "stderr": "No test command found (no pytest/tests, package.json test script, or Makefile test target)."}
-    wrapper = [] if allow_network else _wrapper(project_dir)
-    full = [*wrapper, *cmd]
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(project_dir),
            "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1"}
-    timed_out = False
-    try:
-        p = subprocess.run(full, cwd=project_dir, env=env, capture_output=True, text=True, timeout=timeout,
-                           preexec_fn=_limits(timeout + 5, mem_mb) if os.name == "posix" else None)
-        ok, out, err, code_ = p.returncode == 0, p.stdout, p.stderr, p.returncode
-    except subprocess.TimeoutExpired as e:
-        timed_out = True
-        out = (e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
-        ok, err, code_ = False, f"tests timed out after {timeout}s", None
-    except FileNotFoundError as e:
-        return {"ok": False, "exit_code": None, "stdout": "", "cmd": cmd, "timed_out": False,
-                "stderr": f"could not run the test command {cmd[0]!r}: {e}"}
-    return {"ok": ok, "exit_code": code_, "stdout": out[-12000:], "stderr": err[-6000:],
-            "cmd": cmd, "timed_out": timed_out}
+
+    def _run(wrapper):
+        full = [*wrapper, *cmd]
+        try:
+            p = subprocess.run(full, cwd=project_dir, env=env, capture_output=True, text=True, timeout=timeout,
+                               preexec_fn=_limits(timeout + 5, mem_mb) if os.name == "posix" else None)
+            return {"ok": p.returncode == 0, "exit_code": p.returncode, "stdout": p.stdout,
+                    "stderr": p.stderr, "timed_out": False}
+        except subprocess.TimeoutExpired as e:
+            out = (e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
+            return {"ok": False, "exit_code": None, "stdout": out, "stderr": f"tests timed out after {timeout}s",
+                    "timed_out": True}
+        except (FileNotFoundError, OSError) as e:
+            return {"ok": False, "exit_code": None, "stdout": "",
+                    "stderr": f"could not run the test command {cmd[0]!r}: {e}", "timed_out": True}
+
+    wrapper = [] if allow_network else _wrapper(project_dir)
+    r = _run(wrapper)
+    # If the isolation wrapper was used and the run failed WITHOUT the test runner actually producing any
+    # output (e.g. a broken/denied macOS sandbox-exec), re-run once unwrapped so a bad sandbox never masks
+    # working code. A real test failure prints a report and is left as-is.
+    if wrapper and not r["ok"] and not _looks_like_test_output(r["stdout"] + r["stderr"]):
+        r = _run([])
+    return {"ok": r["ok"], "exit_code": r["exit_code"], "stdout": r["stdout"][-12000:],
+            "stderr": r["stderr"][-6000:], "cmd": cmd, "timed_out": r["timed_out"]}
+
+
+def _looks_like_test_output(text: str) -> bool:
+    """True if the output is clearly from the test runner actually running (not a sandbox/exec error)."""
+    t = text.lower()
+    return any(m in t for m in ("passed", "failed", "error", "collected", "test session",
+                                "no tests ran", "assert", " pass ", "ok"))
