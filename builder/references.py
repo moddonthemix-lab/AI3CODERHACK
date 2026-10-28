@@ -56,6 +56,36 @@ def _read_pdf(path: Path) -> str:
         raise ReferenceError(f"couldn't read the PDF ({e}). If it's scanned images, it has no text to learn from.")
 
 
+def _html_to_text(html: str) -> str:
+    """Strip HTML down to readable prose (drops script/style/tags) so book pages ingest cleanly."""
+    from html.parser import HTMLParser
+
+    class _Text(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.parts = []
+            self.skip = 0
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style", "head", "nav", "footer"):
+                self.skip += 1
+            if tag in ("p", "br", "div", "li", "h1", "h2", "h3", "h4", "pre", "tr"):
+                self.parts.append("\n")
+        def handle_endtag(self, tag):
+            if tag in ("script", "style", "head", "nav", "footer") and self.skip:
+                self.skip -= 1
+        def handle_data(self, data):
+            if not self.skip and data.strip():
+                self.parts.append(data)
+
+    parser = _Text()
+    try:
+        parser.feed(html)
+    except Exception:  # noqa: BLE001 — malformed HTML shouldn't kill ingestion
+        return html
+    import re
+    return re.sub(r"\n{3,}", "\n\n", "".join(parser.parts))
+
+
 def read_document(path: str | Path) -> tuple[str, str]:
     """Return (title, full_text) for a document. Raises ReferenceError with a clear reason on failure."""
     p = Path(path).expanduser()
@@ -72,6 +102,8 @@ def read_document(path: str | Path) -> tuple[str, str]:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
             raise ReferenceError(f"couldn't read '{p.name}': {e}")
+        if ext in (".html", ".htm"):
+            text = _html_to_text(text)
     else:
         raise ReferenceError(f"can't read '{p.name}' ({ext or 'no extension'}). Supported: PDF and text/code "
                              f"files (.txt, .md, .py, .html, .json, …). Convert it to text and try again.")
