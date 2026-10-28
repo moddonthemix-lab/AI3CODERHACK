@@ -294,8 +294,9 @@ def test_game_build_ignores_a_poisoned_recalled_solution(tmp_path):
             return {"content": "ok\nFILES_JSON: {}"}
 
     run_build("a space pong game", proj, LLM(), memory=PoisonedMemory(), tries=1, log=lambda m: None)
-    assert "playerY" in seen[0] and "cpuY" in seen[0]      # real Pong template was used
-    assert "Eat the red dots" not in seen[0]               # NOT the poisoned recalled generic game
+    build_prompt = next(p for p in seen if "FILES_JSON" in p and "playerY" in p)   # the build prompt (not the plan)
+    assert "playerY" in build_prompt and "cpuY" in build_prompt    # real Pong template was used
+    assert "Eat the red dots" not in build_prompt                  # NOT the poisoned recalled generic game
 
 
 # --------------------------------------------------------------------------- persisted undo
@@ -544,3 +545,40 @@ def test_fresh_build_that_only_returns_the_template_is_flagged_honestly(tmp_path
     result = run_build("a one page chef landing page", proj, UselessLLM(), tries=1, log=lambda m: None)
     assert result["ok"] is True                  # the template is valid, so it runs
     assert result.get("used_template") is True   # but we're honest: it's just the starter
+
+
+def test_study_pipeline_plans_then_revises_a_web_build(tmp_path):
+    # The "top student" pipeline: plan first, build, then critique-and-revise once (kept only if still green).
+    import json as _json
+    from builder.buildagent import run_build
+
+    class Cfg:
+        code_dirs = [str(tmp_path)]
+
+    proj = Project(tmp_path / "chef", Cfg())
+    page = ('<!doctype html><html><head><title>{t}</title>'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+            '<body><h1>{t}</h1></body></html>')
+    test_py = "def test_ok():\n    assert '<title>' in open('index.html').read().lower()\n"
+    calls = {"plan": 0, "build": 0, "revise": 0}
+
+    class LLM:
+        def available(self): return True
+        def chat(self, msgs):
+            p = msgs[-1]["content"]
+            if "BEFORE writing any code" in p:
+                calls["plan"] += 1
+                return {"content": "- hero with the chef's name\n- menu section\n- reservations"}
+            if "review your own work" in p:
+                calls["revise"] += 1
+                files = {"index.html": page.format(t="Chef Mario Trattoria"), "test_site.py": test_py}
+                return {"content": "improved\nFILES_JSON: " + _json.dumps(files)}
+            calls["build"] += 1
+            files = {"index.html": page.format(t="Chef Mario"), "test_site.py": test_py}
+            return {"content": "draft\nFILES_JSON: " + _json.dumps(files)}
+
+    result = run_build("a one page chef landing page", proj, LLM(), tries=1, log=lambda m: None)
+    assert result["ok"] is True
+    assert calls["plan"] == 1          # he planned before building
+    assert calls["revise"] == 1        # he reviewed his own draft
+    assert "Trattoria" in (tmp_path / "chef" / "index.html").read_text()   # the improved revision was kept

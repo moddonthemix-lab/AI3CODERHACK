@@ -230,6 +230,45 @@ def _generator(llm):
     return gen
 
 
+# These two steps are what turn the same local model from a template-filler into a methodical student:
+# PLAN the work before writing it, then CRITIQUE and REVISE the first draft. Both are best-effort — if the
+# model (or the network) hiccups, the build just proceeds without them.
+_STUDY_KINDS = ("web", "game", "pygame")      # the creative builds where "too generic" is the usual problem
+
+
+def _plan(generate, task: str, note: str, log=print) -> str:
+    """Ask the model for a concrete build plan first — weak models build far better from an outline."""
+    prompt = (
+        f"You are about to build: {task!r}.{note}\n\n"
+        "BEFORE writing any code, write a SHORT build plan (5–8 bullet points) that is SPECIFIC to this "
+        "request — the exact sections/screens it needs, the key elements and real text in each, the colour "
+        "theme, and what makes it clearly THIS and not a generic page/game. Bullet list only, no code.")
+    try:
+        text = (generate(prompt) or "").strip()
+    except Exception:  # noqa: BLE001 — planning is optional
+        return ""
+    if text:
+        log("  (planned the build first, like a student outlining before writing)")
+    return text[:1200]
+
+
+def _revise(generate, task: str, files: dict, note: str, log=print) -> dict:
+    """One self-critique pass: the model reviews its own draft against the request and improves specificity."""
+    current = "".join(f"\n=== {n} ===\n{c}\n" for n, c in files.items())
+    prompt = (
+        f"You built this for the request: {task!r}.{note}\n\nYour current files:\n{current[:9000]}\n\n"
+        "Now review your own work like a demanding senior engineer. Is it SPECIFIC to the request, or still "
+        "generic/placeholder? In ONE line say what's generic or missing, then return the COMPLETE improved "
+        "files with those fixes applied — real, request-specific content, text, colours and sections. Keep "
+        "it fully working and keep the tests passing." + FILE_CONTRACT)
+    try:
+        _, revised = files_from_reply(generate(prompt))
+        revised, _ = _usable_files(revised)
+        return revised
+    except Exception:  # noqa: BLE001 — revision is optional
+        return {}
+
+
 def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print, fallback_llm=None):
     """Build + test a project: recall memory, build on ``llm``, and if it fails retry once on
     ``fallback_llm`` (the stronger/slower model) adapting what the first model produced. Records the
@@ -299,6 +338,21 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
         except Exception:  # noqa: BLE001
             pass
 
+    # The STRONGEST available model does the "thinking" steps (plan + self-review), where quality matters most.
+    smart = llm
+    if fallback_llm is not None:
+        try:
+            if fallback_llm.available():
+                smart = fallback_llm
+        except Exception:  # noqa: BLE001
+            pass
+
+    # STUDY HABIT 1 — plan before building (only for the creative builds, where "too generic" is the problem).
+    if kind in _STUDY_KINDS and not is_modify:
+        plan = _plan(_generator(smart), task, note, log=log)
+        if plan:
+            note = (note + "\n\nYour build plan (follow it, make the result specific to it):\n" + plan)
+
     propose = make_propose(_generator(primary), task, log=log, memory_note=note, starter=starter,
                            is_modify=is_modify)
     result = build_and_test(project, propose, test_cmd=test_cmd, max_tries=tries, log=log)
@@ -359,6 +413,24 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
             test = sandbox.run_tests(project.root, test_cmd)
             result = {"ok": bool(test.get("ok")), "attempts": result.get("attempts", tries), "test": test,
                       "diff": project.diff(), "failures": result.get("failures", []), "used_template": True}
+
+    # STUDY HABIT 2 — review and improve his own first draft (once), for a real custom build. Only kept if it
+    # still passes the tests, so proofreading can never break a working result.
+    if (kind in _STUDY_KINDS and not is_modify and result.get("ok")
+            and not result.get("used_template")):
+        from . import sandbox
+        current = {name: project.read(name) for name in project.changed()}
+        revised = _revise(_generator(smart), task, current, note, log=log)
+        if revised and revised != current:
+            project.write_all(revised)
+            test = sandbox.run_tests(project.root, test_cmd)
+            if test.get("ok"):
+                log("  (reviewed and improved his own draft to be more specific)")
+                result = {"ok": True, "attempts": result.get("attempts", tries), "test": test,
+                          "diff": project.diff(), "failures": result.get("failures", [])}
+            else:
+                project.write_all(current)   # revision broke the tests — keep the working draft
+                log("  (kept the first draft — the self-review didn't improve on it)")
 
     if memory is not None:
         try:

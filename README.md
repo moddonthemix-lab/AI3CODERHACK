@@ -195,10 +195,17 @@ Every endpoint stays inside the scope and the gates above.
 | `builder serve` | Start the HTTP API + dashboard |
 | `builder hub --check` | See whether the family cloud brain is ready (☁️ / 🏠) |
 
+**How he builds (study habits, not just templates):** for a page or game he works like a careful student —
+he **plans** the build first (the sections/screens, the real content, the theme), writes it (pulling in
+relevant passages from your reference library), then **reviews his own first draft and revises it** to be
+specific to your request, keeping the improvement only if the tests still pass. If he only manages to
+reproduce the starter, he **says so honestly** rather than passing a generic template off as your custom
+build, and he escalates to the stronger model to try for a real one.
+
 **Reliability:** every build starts from a working template and keeps it as a guaranteed fallback, so a
-build always produces a runnable result. Builder uses the fast model first and falls back to the stronger
-one if needed. Tests run via pytest when it's installed, otherwise a built-in runner — so `pip install -e .`
-is enough; pytest is optional.
+build always produces a runnable result. Builder uses the fast model first and the stronger one for the
+thinking steps (planning, self-review) and whenever the fast one falls short. Tests run via pytest when
+it's installed, otherwise a built-in runner — so `pip install -e .` is enough; pytest is optional.
 
 Configuration is all optional — see `.env.example`. Builder's variables are `BUILDER_*`; the old
 `SCHOLAR_*` names still work as a fallback.
