@@ -113,9 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("forget", help="Delete a note by id")
     s.add_argument("id", type=int)
 
-    s = sub.add_parser("learn-doc", help="Teach Builder from a document (a coding book, reference or notes) — he refers to it when building")
-    s.add_argument("path", help="path to a .txt/.md/.py/.html/… file, or a .pdf (needs: pip install 'builder[docs]')")
-    s.add_argument("--title", default="", help="a friendly title (defaults to the file name)")
+    s = sub.add_parser("learn-doc", help="Teach Builder from documents (coding books, references, notes) — files, folders or URLs")
+    s.add_argument("path", nargs="+", help="one or more files, FOLDERS (a whole book repo), or http(s) URLs. "
+                                           "PDFs need: pip install 'builder[docs]'")
+    s.add_argument("--title", default="", help="a friendly title (defaults to each file's name)")
     s = sub.add_parser("refs", help="The documents Builder has read (his reference library)")
     s.add_argument("--forget", metavar="SOURCE", help="remove a document by its name (as shown in the list)")
 
@@ -515,14 +516,15 @@ def main(argv: list[str] | None = None) -> int:
         elif cmd == "forget":
             print("forgotten" if db.forget(args.id) else "no note with that id")
         elif cmd == "learn-doc":
-            from .references import ReferenceError
-            try:
-                info = memory.learn_doc(args.path, title=args.title)
-            except ReferenceError as e:
-                print(f"✗ {e}", file=sys.stderr)
+            err = lambda m: print(m, file=sys.stderr)  # noqa: E731
+            summary = memory.learn_docs(args.path, title=args.title, log=err)
+            if summary["docs"]:
+                print(f"✓ Learned {summary['docs']} document(s), {summary['chunks']} passage(s) total. "
+                      f"Builder will refer to them when building (offline too).")
+            for name, reason in summary["errors"]:
+                err(f"✗ {name}: {reason}")
+            if not summary["docs"]:
                 return 1
-            print(f"✓ Learned '{info['title']}' — {info['chunks']} passage(s) stored. "
-                  f"Builder will refer to it when building (offline too).")
         elif cmd == "refs":
             if args.forget:
                 n = memory.forget_doc(args.forget)

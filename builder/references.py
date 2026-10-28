@@ -22,12 +22,21 @@ TEXT_EXTS = {".txt", ".md", ".markdown", ".rst", ".py", ".js", ".ts", ".jsx", ".
              ".css", ".json", ".csv", ".tsv", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".sh", ".c",
              ".h", ".cpp", ".cc", ".java", ".go", ".rs", ".rb", ".php", ".sql", ".log", ""}
 
-MAX_DOC_BYTES = 8_000_000      # a sane cap so one huge file can't blow up the store
+MAX_DOC_BYTES = 40_000_000     # books/PDFs can be large; pypdf extracts text only, so this stays manageable
 CHUNK_CHARS = 900              # ~a couple of paragraphs per passage — enough context, small enough to rank
+MAX_TREE_FILES = 500           # don't ingest a whole giant repo by accident
+
+# Folders never worth walking into when ingesting a book/repo folder.
+_SKIP_DIRS = {".git", ".github", "node_modules", "__pycache__", ".venv", ".pytest_cache", "dist", "build",
+              ".idea", ".vscode", "assets", "images", "img"}
 
 
 class ReferenceError(Exception):
     """A document couldn't be read (unsupported type, missing optional reader, too big, unreadable)."""
+
+
+def is_url(s: str) -> bool:
+    return str(s).lower().startswith(("http://", "https://"))
 
 
 def _read_pdf(path: Path) -> str:
@@ -38,6 +47,8 @@ def _read_pdf(path: Path) -> str:
         raise ReferenceError(
             "reading PDFs needs the optional 'pypdf' library. Install it with:  pip install 'builder[docs]'  "
             "(or  pip install pypdf), or convert the PDF to a .txt file and upload that instead.")
+    import logging
+    logging.getLogger("pypdf").setLevel(logging.ERROR)   # hush harmless font/encoding warnings
     try:
         reader = pypdf.PdfReader(str(path))
         return "\n\n".join((page.extract_text() or "") for page in reader.pages)
@@ -90,12 +101,51 @@ def chunk_text(text: str, size: int = CHUNK_CHARS) -> list[str]:
     return chunks
 
 
-def ingest(store, path: str | Path, title: str = "") -> dict:
+def download(url: str, timeout: int = 90) -> tuple[str, str]:
+    """Download a URL to a temp file (for `learn-doc <url>`). Returns (temp_path, suggested_name).
+
+    An explicit, user-initiated fetch — Builder's building/recall stay fully offline; only this command
+    reaches the network, and only when you hand it a URL.
+    """
+    import tempfile
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    name = Path(urllib.parse.urlparse(url).path).name or "download"
+    req = urllib.request.Request(url, headers={"User-Agent": "Builder/1.0 (reference library)"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read(MAX_DOC_BYTES + 1)
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise ReferenceError(f"couldn't download {url} ({e}). Check the link, or download it yourself and "
+                             f"pass the file path instead.")
+    if len(data) > MAX_DOC_BYTES:
+        raise ReferenceError(f"that download is larger than {MAX_DOC_BYTES // 1_000_000} MB.")
+    # Make sure the temp file has a sensible extension so read_document knows how to read it.
+    suffix = Path(name).suffix.lower()
+    if not suffix:
+        if data[:5] == b"%PDF-" or "pdf" in ctype:
+            suffix, name = ".pdf", name + ".pdf"
+        elif "html" in ctype:
+            suffix, name = ".html", name + ".html"
+        else:
+            suffix, name = ".txt", name + ".txt"
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    import os
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    return tmp, name
+
+
+def ingest(store, path: str | Path, title: str = "", source: str | None = None) -> dict:
     """Read a document, chunk it, and store its passages. Replaces any existing doc with the same name.
 
-    Returns {"source", "title", "chunks"}. Raises ReferenceError if the document can't be read.
+    ``source`` overrides the stored name (used when ``path`` is a temp file from a URL/upload). Returns
+    {"source", "title", "chunks"}. Raises ReferenceError if the document can't be read.
     """
-    source, text = read_document(path)
+    name, text = read_document(path)
+    source = (source or name).strip()
     title = (title or source).strip()
     chunks = chunk_text(text)
     if not chunks:
@@ -104,6 +154,68 @@ def ingest(store, path: str | Path, title: str = "") -> dict:
     for i, chunk in enumerate(chunks):
         store.add_ref(source, title, i, chunk)
     return {"source": source, "title": title, "chunks": len(chunks)}
+
+
+def iter_documents(path: str | Path):
+    """Yield readable document paths under ``path``: a file yields itself; a folder is walked (text/PDF
+    files only, skipping junk folders), capped at MAX_TREE_FILES."""
+    p = Path(path).expanduser()
+    if p.is_file():
+        yield p
+        return
+    if p.is_dir():
+        count = 0
+        for f in sorted(p.rglob("*")):
+            if count >= MAX_TREE_FILES:
+                break
+            if not f.is_file() or (_SKIP_DIRS & set(f.parts)):
+                continue
+            ext = f.suffix.lower()
+            if ext == ".pdf" or (ext in TEXT_EXTS and ext != ""):   # skip extensionless files when walking
+                count += 1
+                yield f
+
+
+def ingest_many(store, paths, title: str = "", log=None) -> dict:
+    """Learn from several files/folders/URLs at once. Returns {docs, chunks, errors:[(name,reason)]}."""
+    import os
+    docs = chunks = 0
+    errors = []
+    for raw in (paths if isinstance(paths, (list, tuple)) else [paths]):
+        if is_url(str(raw)):
+            try:
+                tmp, name = download(str(raw))
+            except ReferenceError as e:
+                errors.append((str(raw), str(e)))
+                continue
+            try:
+                info = ingest(store, tmp, title=title, source=name)
+                docs += 1
+                chunks += info["chunks"]
+                if log:
+                    log(f"  learned {name} ({info['chunks']} passages)")
+            except ReferenceError as e:
+                errors.append((name, str(e)))
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            continue
+        found = list(iter_documents(raw))
+        if not found:
+            errors.append((str(raw), "no readable text/PDF documents here"))
+            continue
+        for f in found:
+            try:
+                info = ingest(store, f)
+                docs += 1
+                chunks += info["chunks"]
+                if log:
+                    log(f"  learned {f.name} ({info['chunks']} passages)")
+            except ReferenceError as e:
+                errors.append((f.name, str(e)))
+    return {"docs": docs, "chunks": chunks, "errors": errors}
 
 
 def recall(store, task: str, k: int = 4) -> list[dict]:

@@ -119,13 +119,16 @@ relevant passages into his build/edit prompts — so he gets better at the kinds
 all offline:
 
 ```bash
-builder learn-doc ~/Books/game-programming-patterns.txt
-builder learn-doc ~/notes/our-coding-style.md --title "House style"
-builder refs                                    # everything he's read
+builder learn-doc ~/Books/game-programming-patterns.txt        # one file
+builder learn-doc ~/repos/noc-book-2/content                   # a whole book folder
+builder learn-doc https://example.com/some-book.pdf            # or straight from a URL
+builder learn-doc ~/notes/style.md --title "House style"
+builder refs                                                   # everything he's read
 ```
 
-Text and code files need nothing extra; PDFs need one small optional library (`pip install 'builder[docs]'`).
-There's an upload box in the dashboard too.
+Files, **folders** (a whole book/repo at once) and **http(s) URLs** all work. Text and code files need
+nothing extra; PDFs need one small optional library (`pip install 'builder[docs]'`). There's an upload box
+in the dashboard too (single files up to 8 MB).
 
 ### Review your own code
 

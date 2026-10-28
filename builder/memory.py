@@ -50,6 +50,11 @@ class Memory:
         from . import references
         return references.ingest(self.db, path, title=title)
 
+    def learn_docs(self, paths, title: str = "", log=None) -> dict:
+        """Learn from several files/folders/URLs at once (books, repos, PDFs). Returns a summary dict."""
+        from . import references
+        return references.ingest_many(self.db, paths, title=title, log=log)
+
     def reference_note(self, task: str, max_chars: int = 1800) -> str:
         """The passages from the reference library most relevant to ``task``, rendered for the prompt."""
         from . import references

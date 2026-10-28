@@ -65,3 +65,24 @@ def test_forget_removes_a_document(tmp_path):
     mem.learn_doc(str(doc))
     assert mem.forget_doc("x.md") >= 1
     assert mem.documents() == []
+
+
+def test_ingest_many_walks_a_folder_and_skips_junk(tmp_path):
+    mem = _mem()
+    (tmp_path / "ch1.md").write_text("Game loop: update then draw each frame.")
+    (tmp_path / "ch2.md").write_text("Object pool pattern reuses objects.")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("should be skipped")
+    (tmp_path / "logo.png").write_bytes(b"\x89PNG not text")
+
+    summary = mem.learn_docs([str(tmp_path)])
+    assert summary["docs"] == 2          # two .md files only
+    assert summary["errors"] == []
+    assert {d["source"] for d in mem.documents()} == {"ch1.md", "ch2.md"}
+
+
+def test_is_url_detection():
+    assert references.is_url("https://example.com/book.pdf")
+    assert references.is_url("http://example.com/x")
+    assert not references.is_url("/home/me/book.pdf")
+    assert not references.is_url("book.md")
