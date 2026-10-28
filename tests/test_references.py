@@ -86,3 +86,48 @@ def test_is_url_detection():
     assert references.is_url("http://example.com/x")
     assert not references.is_url("/home/me/book.pdf")
     assert not references.is_url("book.md")
+
+
+def test_learn_insight_is_stored_and_recallable():
+    mem = _mem()
+    mem.learn_insight("pong game", "Use requestAnimationFrame and a fixed timestep for smooth motion.",
+                      source="build")
+    docs = mem.documents()
+    assert any(d["source"] == "learned-insights" for d in docs)
+    note = mem.reference_note("build a pong game")
+    assert "requestAnimationFrame" in note or "fixed timestep" in note
+
+
+def test_build_with_a_stronger_model_distils_an_insight(tmp_path):
+    # When a stronger model is available and plans a working build, the approach is learned for next time.
+    import json as _json
+    from builder.buildagent import run_build
+    from builder.db import Store
+    from builder.memory import Memory
+    from builder.projects import Project
+
+    class Cfg:
+        code_dirs = [str(tmp_path)]
+
+    store = Store(":memory:")
+    mem = Memory(store)
+    proj = Project(tmp_path / "site", Cfg())
+    page = ('<!doctype html><html><head><title>Joe\'s Tacos</title>'
+            '<meta name="viewport" content="width=device-width"></head><body><h1>Joe\'s Tacos</h1></body></html>')
+    test_py = "def test_ok():\n    assert 'tacos' in open('index.html').read().lower()\n"
+    files = {"index.html": page, "test_site.py": test_py}
+
+    class Model:
+        def __init__(self, tag): self.tag = tag
+        def available(self): return True
+        def chat(self, msgs):
+            p = msgs[-1]["content"]
+            if "BEFORE writing any code" in p:
+                return {"content": "- taco hero\n- menu\n- hours"}      # the plan (from the stronger model)
+            if "review your own work" in p:
+                return {"content": "better\nFILES_JSON: " + _json.dumps(files)}
+            return {"content": "draft\nFILES_JSON: " + _json.dumps(files)}
+
+    run_build("a taco truck landing page", proj, Model("fast"), memory=mem, tries=1,
+              log=lambda m: None, fallback_llm=Model("strong"))
+    assert any(d["source"] == "learned-insights" for d in mem.documents())   # it learned from the strong model

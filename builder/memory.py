@@ -67,6 +67,19 @@ class Memory:
         """The documents Builder has read (name, title, passage count)."""
         return self.db.ref_sources()
 
+    def learn_insight(self, topic: str, text: str, source: str = "stronger model") -> int:
+        """Store something the STRONGER/cloud model worked out, as a reference passage the local model can
+        retrieve later — so the offline/smaller model gets sharper from the cloud brain over time.
+
+        This is how 'the lower models learn from the cloud brain': the strong model's proven approaches are
+        distilled into the same keyword-indexed library his builds already draw on, so later builds (even
+        offline on the small model) recall and reuse them.
+        """
+        src = "learned-insights"
+        title = "What Builder learned (from the stronger / cloud model)"
+        n = next((r["chunks"] for r in self.db.ref_sources() if r["source"] == src), 0)
+        return self.db.add_ref(src, title, n, f"[{topic}] {text}".strip())
+
     def forget_doc(self, source: str) -> int:
         return self.db.delete_refs(source)
 

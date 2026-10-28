@@ -346,8 +346,10 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
                 smart = fallback_llm
         except Exception:  # noqa: BLE001
             pass
+    has_stronger = smart is not llm            # a stronger/cloud model is available to learn from
 
     # STUDY HABIT 1 — plan before building (only for the creative builds, where "too generic" is the problem).
+    plan = ""
     if kind in _STUDY_KINDS and not is_modify:
         plan = _plan(_generator(smart), task, note, log=log)
         if plan:
@@ -441,6 +443,12 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
             files = {name: project.read(name) for name in project.changed()} if save_files else None
             memory.remember_build(task, str(project.root), result["ok"], result["attempts"],
                                   problem_signature(result.get("failures", [])), files=files)
+            # LEARN FROM THE STRONGER BRAIN: when a stronger/cloud model planned a build that actually
+            # worked, distil that proven approach into the reference library so the small offline model
+            # can recall and reuse it next time.
+            if has_stronger and plan and save_files:
+                memory.learn_insight(task, "Approach that produced a working build:\n" + plan,
+                                     source="build")
         except Exception:  # noqa: BLE001 — recording must never fail a build
             pass
     return result
