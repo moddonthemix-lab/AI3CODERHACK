@@ -11,50 +11,76 @@ Keep each template small, correct, and self-contained (standard library / plain 
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------- game (playable canvas)
+# ---------------------------------------------------------------- snake (real classic Snake)
 _GAME_HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Game</title>
+<html><head><meta charset="utf-8"><title>Snake</title>
 <style>body{margin:0;background:#111;color:#eee;font-family:sans-serif;text-align:center}
 canvas{background:#000;display:block;margin:12px auto;border:2px solid #333}</style></head>
 <body>
-<h1>Game</h1>
-<p>Arrow keys to move. Eat the red dots to score.</p>
+<h1>Snake</h1>
+<p>Arrow keys to steer. Eat the red food to grow. Don't hit the walls or yourself. (Space to restart.)</p>
 <canvas id="game" width="400" height="400"></canvas>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const SIZE = 20;
-let player = {x: 200, y: 200};
-let food = {x: 100, y: 100};
-let dir = {x: 0, y: 0};
-let score = 0;
+const CELL = 20;
+const COLS = canvas.width / CELL, ROWS = canvas.height / CELL;
+const SNAKE_COLOR = 'lime';          // the snake is green
+let snake, dir, nextDir, food, score, alive;
 
 function placeFood() {
-  food.x = Math.floor(Math.random() * (canvas.width / SIZE)) * SIZE;
-  food.y = Math.floor(Math.random() * (canvas.height / SIZE)) * SIZE;
+  do {
+    food = {x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS)};
+  } while (snake.some(s => s.x === food.x && s.y === food.y));
 }
-function update() {
-  player.x += dir.x; player.y += dir.y;
-  if (player.x < 0) player.x = canvas.width - SIZE;
-  if (player.x >= canvas.width) player.x = 0;
-  if (player.y < 0) player.y = canvas.height - SIZE;
-  if (player.y >= canvas.height) player.y = 0;
-  if (player.x === food.x && player.y === food.y) { score += 1; placeFood(); }
+function reset() {
+  snake = [{x: 8, y: 10}, {x: 7, y: 10}, {x: 6, y: 10}];   // a real body, 3 segments long
+  dir = {x: 1, y: 0};
+  nextDir = {x: 1, y: 0};
+  score = 0;
+  alive = true;
+  placeFood();
+}
+function step() {
+  dir = nextDir;
+  const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+  if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS ||
+      snake.some(s => s.x === head.x && s.y === head.y)) {
+    alive = false;                   // hit a wall or itself
+    return;
+  }
+  snake.unshift(head);
+  if (head.x === food.x && head.y === food.y) { score += 1; placeFood(); }  // grow
+  else snake.pop();                  // move: drop the tail
 }
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'lime'; ctx.fillRect(player.x, player.y, SIZE, SIZE);
-  ctx.fillStyle = 'red'; ctx.fillRect(food.x, food.y, SIZE, SIZE);
-  ctx.fillStyle = '#fff'; ctx.font = '16px sans-serif'; ctx.fillText('Score: ' + score, 10, 20);
+  ctx.fillStyle = 'red';
+  ctx.fillRect(food.x * CELL, food.y * CELL, CELL, CELL);
+  ctx.fillStyle = SNAKE_COLOR;
+  for (const s of snake) ctx.fillRect(s.x * CELL, s.y * CELL, CELL - 1, CELL - 1);
+  ctx.fillStyle = '#fff'; ctx.font = '16px sans-serif';
+  ctx.fillText('Score: ' + score, 10, 20);
+  if (!alive) {
+    ctx.font = '26px sans-serif';
+    ctx.fillText('Game Over - press Space', 55, canvas.height / 2);
+  }
 }
-function loop() { update(); draw(); requestAnimationFrame(loop); }
+let last = 0;
+function loop(ts) {
+  if (ts - last > 110) { last = ts; if (alive) step(); }   // snake speed
+  draw();
+  requestAnimationFrame(loop);
+}
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'ArrowUp') dir = {x: 0, y: -SIZE};
-  else if (e.key === 'ArrowDown') dir = {x: 0, y: SIZE};
-  else if (e.key === 'ArrowLeft') dir = {x: -SIZE, y: 0};
-  else if (e.key === 'ArrowRight') dir = {x: SIZE, y: 0};
+  if (e.key === 'ArrowUp' && dir.y === 0) nextDir = {x: 0, y: -1};
+  else if (e.key === 'ArrowDown' && dir.y === 0) nextDir = {x: 0, y: 1};
+  else if (e.key === 'ArrowLeft' && dir.x === 0) nextDir = {x: -1, y: 0};
+  else if (e.key === 'ArrowRight' && dir.x === 0) nextDir = {x: 1, y: 0};
+  else if (e.key === ' ' && !alive) reset();
 });
-placeFood(); loop();
+reset();
+requestAnimationFrame(loop);
 </script>
 </body></html>
 """
@@ -64,6 +90,14 @@ _GAME_TEST = """def test_game_has_the_essentials():
     assert 'requestAnimationFrame' in html
     assert 'addEventListener' in html
     assert 'getContext' in html
+"""
+_SNAKE_TEST = """def test_snake_has_the_essentials():
+    html = open('index.html').read()
+    assert '<canvas' in html
+    assert 'requestAnimationFrame' in html
+    assert 'addEventListener' in html
+    assert 'getContext' in html
+    assert 'snake' in html            # a real snake (a body that grows), not just a moving square
 """
 
 # ---------------------------------------------------------------- neutral GAME STARTER (honest fallback)
@@ -497,8 +531,8 @@ def test_add():
 TEMPLATES = {
     "game": {"desc": "A blank canvas game starter (index.html) + a test — a base to build any game on",
              "files": {"index.html": _STARTER_HTML, "test_game.py": _GAME_TEST}},
-    "snake": {"desc": "Classic Snake — move with arrows, eat dots to score (index.html) + a test",
-              "files": {"index.html": _GAME_HTML, "test_game.py": _GAME_TEST}},
+    "snake": {"desc": "Classic Snake — a green snake that grows; don't hit the walls or yourself (index.html) + a test",
+              "files": {"index.html": _GAME_HTML, "test_snake.py": _SNAKE_TEST}},
     "pong": {"desc": "Pong — your paddle vs the CPU, bouncing ball, score (index.html) + a test",
              "files": {"index.html": _PONG_HTML, "test_pong.py": _PONG_TEST}},
     "breakout": {"desc": "Breakout — paddle, ball and bricks to clear (index.html) + a test",
