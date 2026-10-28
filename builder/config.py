@@ -151,6 +151,9 @@ class Config:
     code_dirs: list[str] = field(default_factory=lambda: _code_dirs())
     # Authorized-lab mode is OFF unless the boss turns it on for a session AND confirms the target (Part 5).
     lab_mode: bool = field(default_factory=lambda: _env("LAB_MODE", "0").lower() in ("1", "true", "yes"))
+    # An extra password required to turn offense/authorized-lab mode on or off FROM THE DASHBOARD. Empty =
+    # the dashboard can't toggle it (use the terminal); set BUILDER_LAB_PASSWORD to enable the panel.
+    lab_password: str = field(default_factory=lambda: _env("LAB_PASSWORD"))
 
     @property
     def db_path(self) -> Path:

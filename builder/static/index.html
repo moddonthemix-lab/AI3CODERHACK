@@ -64,6 +64,32 @@
     <div id="sout" style="white-space:pre-wrap; margin-top:10px; font-size:13px"></div>
   </div>
 
+  <div class="panel" style="border-color:#5a2b2b">
+    <h2 style="color:#ff8a8a">Offense mode <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0">— authorized-lab practice (CTFs / systems you own). Password-protected.</span></h2>
+    <div id="labstatus" style="font-size:13px; margin-bottom:8px">loading…</div>
+    <div id="labon">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+        <input id="labtarget" placeholder="target you own (e.g. my-practice-vm, a CTF name)" style="flex:1; min-width:160px">
+        <select id="labkind" style="padding:8px; background:#0e1116; color:var(--fg); border:1px solid var(--line); border-radius:8px">
+          <option value="vm">VM you own</option>
+          <option value="ctf">CTF challenge</option>
+          <option value="local-app">local app you own</option>
+          <option value="lab">other lab</option>
+        </select>
+      </div>
+      <label style="display:flex; gap:8px; align-items:center; margin-top:8px; font-size:13px; color:var(--dim)">
+        <input type="checkbox" id="labown"> I own this target, or it's made for practice (a CTF / my VM)
+      </label>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px">
+        <input id="labpw" type="password" placeholder="offense-mode password" style="flex:1; min-width:140px">
+        <button onclick="labOn()" id="labonbtn" style="background:#e5484d; color:#fff">Turn ON</button>
+      </div>
+    </div>
+    <div style="margin-top:8px"><button onclick="labOff()" id="laboffbtn" style="background:#333; color:var(--fg)">Turn OFF (clears all targets)</button></div>
+    <div id="labout" style="font-size:13px; margin-top:8px"></div>
+    <div id="lablog" style="font-size:12px; color:var(--dim); margin-top:10px"></div>
+  </div>
+
   <div class="panel">
     <h2>Ask Builder <span style="color:var(--dim); font-weight:400; text-transform:none; letter-spacing:0">— coding or defensive-security questions</span></h2>
     <input id="q" placeholder="e.g. how do I store passwords safely? how does phishing work?">
@@ -168,9 +194,54 @@ async function refresh() {
     $("knows").innerHTML = items.length ? items.join("")
       : `<span class="empty">nothing yet — teach him with <code>builder feedback "…"</code> or <code>builder remember "…"</code></span>`;
     await refreshRefs();
+    await refreshLab();
   } catch (e) {
     $("status").textContent = "can't reach Builder";
   }
+}
+async function refreshLab() {
+  const d = await api("/api/lab");
+  const on = d.enabled;
+  $("labstatus").innerHTML = on
+    ? `🔴 <b style="color:#ff8a8a">ON</b> — authorized targets: ` +
+      (d.targets || []).map(t => `<code>${esc(t.target)}</code> <span style="color:var(--dim)">(${esc(t.kind)})</span>`).join(", ")
+    : `🟢 <b>OFF</b> — defensive mode only (safe default).`;
+  $("labon").style.display = on ? "none" : "block";
+  $("laboffbtn").style.display = on ? "inline-block" : "none";
+  if (!d.has_password) {
+    $("labout").innerHTML = "ℹ️ To use this panel, add <code>BUILDER_LAB_PASSWORD=yourpassword</code> to your .env and restart the server.";
+  }
+  const log = d.log || [];
+  $("lablog").innerHTML = log.length
+    ? "Recent security log:<br>" + log.slice(0, 6).map(e =>
+        `${esc(e.at ? e.at.slice(5, 16) : "")} · ${esc(e.action)} → ${esc(e.decision)}` +
+        (e.target ? ` <code>${esc(e.target)}</code>` : "")).join("<br>")
+    : "";
+}
+async function labOn() {
+  const target = $("labtarget").value.trim();
+  if (!target) { $("labout").textContent = "Name the target you're authorizing."; return; }
+  if (!$("labown").checked) { $("labout").textContent = "Tick the box to confirm you own this target."; return; }
+  if (!$("labpw").value) { $("labout").textContent = "Enter the offense-mode password."; return; }
+  $("labonbtn").disabled = true;
+  try {
+    const r = await api("/api/lab/on", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: target, kind: $("labkind").value, i_own_this: true, password: $("labpw").value }) });
+    $("labout").innerHTML = r.error ? ("✗ " + esc(r.error)) : `🔴 Offense mode ON for "${esc(target)}".`;
+    $("labpw").value = "";
+    refreshLab(); refresh();
+  } catch (e) { $("labout").textContent = "error: " + e; }
+  $("labonbtn").disabled = false;
+}
+async function labOff() {
+  const pw = prompt("Offense-mode password to turn it OFF:");
+  if (pw === null) return;
+  try {
+    const r = await api("/api/lab/off", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }) });
+    $("labout").innerHTML = r.error ? ("✗ " + esc(r.error)) : "🟢 Offense mode OFF — all targets cleared.";
+    refreshLab(); refresh();
+  } catch (e) { $("labout").textContent = "error: " + e; }
 }
 async function refreshRefs() {
   const docs = await api("/api/refs");

@@ -185,7 +185,10 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                 if url.path == "/api/pending":
                     return self._send(200, store.pending(qs.get("all") in ("1", "true")))
                 if url.path == "/api/lab":
-                    return self._send(200, {"targets": store.lab_targets(True), "log": store.safety_events(20)})
+                    return self._send(200, {
+                        "enabled": bool(store.lab_targets(True)),
+                        "has_password": bool(getattr(cfg, "lab_password", "")),
+                        "targets": store.lab_targets(True), "log": store.safety_events(20)})
                 if url.path == "/api/refs":
                     return self._send(200, store.ref_sources())
                 if url.path == "/api/templates":
@@ -371,6 +374,32 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                         _os.unlink(tmp)
                     except OSError:
                         pass
+            if path in ("/api/lab/on", "/api/lab/off"):
+                # Turn offense / authorized-lab mode on or off from the dashboard, behind an EXTRA password.
+                import hmac
+                from .safety import ApprovalRequired, Safety, SafetyError
+                if cfg is None:
+                    return self._send(503, {"error": "builder not configured"})
+                pw = getattr(cfg, "lab_password", "") or ""
+                if not pw:
+                    return self._send(403, {"error": "Set BUILDER_LAB_PASSWORD in your .env to control "
+                                            "offense mode from the dashboard (then restart)."})
+                if not hmac.compare_digest(str(body.get("password", "")), pw):
+                    store.log_safety("lab_mode", "refused", reason="wrong dashboard password")
+                    return self._send(403, {"error": "wrong password"})
+                safety = Safety(store, cfg, approver=None, log=lambda m: None)
+                if path == "/api/lab/off":
+                    safety.disable_lab()
+                    return self._send(200, {"enabled": False, "targets": []})
+                target = str(body.get("target", "")).strip()
+                if not body.get("i_own_this"):
+                    return self._send(400, {"error": "Confirm you own this target (or it's a practice target)."})
+                try:
+                    safety.enable_lab(target, str(body.get("kind", "lab")), str(body.get("note", "")),
+                                      confirmed=True)
+                except (SafetyError, ApprovalRequired) as e:
+                    return self._send(400, {"error": str(e)})
+                return self._send(200, {"enabled": True, "targets": store.lab_targets(True)})
             if path == "/api/refs/forget" and body.get("source"):
                 return self._send(200, {"removed": store.delete_refs(str(body["source"]))})
             with lock:

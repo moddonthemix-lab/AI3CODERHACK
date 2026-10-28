@@ -102,3 +102,47 @@ def test_learn_doc_upload_list_and_forget(tmp_path):
         assert docs == []
     finally:
         httpd.shutdown()
+
+
+def test_offense_mode_dashboard_toggle_is_password_gated(tmp_path):
+    from builder.memory import Memory
+    cfg = Config(home=tmp_path, code_dirs=[str(tmp_path)], lab_password="s3cret")
+    store = Store(cfg.db_path)
+    memory = Memory(store, None, cfg)
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(store, FakeAssistant(cfg), token="", memory=memory))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        status, body = _req(base + "/api/lab")
+        assert status == 200 and body["enabled"] is False and body["has_password"] is True
+
+        # wrong password refused; missing ownership confirmation refused
+        assert _req(base + "/api/lab/on", "POST", {"target": "vm", "i_own_this": True, "password": "x"})[0] == 403
+        assert _req(base + "/api/lab/on", "POST", {"target": "vm", "i_own_this": False, "password": "s3cret"})[0] == 400
+
+        # correct password + confirmation enables it
+        status, body = _req(base + "/api/lab/on", "POST",
+                            {"target": "my-vm", "kind": "vm", "i_own_this": True, "password": "s3cret"})
+        assert status == 200 and body["enabled"] is True
+        assert _req(base + "/api/lab")[1]["enabled"] is True
+
+        # turning off needs the password too
+        assert _req(base + "/api/lab/off", "POST", {"password": "s3cret"})[0] == 200
+        assert _req(base + "/api/lab")[1]["enabled"] is False
+    finally:
+        httpd.shutdown()
+
+
+def test_offense_mode_needs_a_password_configured(tmp_path):
+    cfg = Config(home=tmp_path, code_dirs=[str(tmp_path)])   # no lab_password set
+    store = Store(cfg.db_path)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(store, FakeAssistant(cfg), token=""))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        assert _req(base + "/api/lab")[1]["has_password"] is False
+        # with no password configured, the dashboard can't toggle it at all
+        assert _req(base + "/api/lab/on", "POST", {"target": "x", "i_own_this": True, "password": ""})[0] == 403
+    finally:
+        httpd.shutdown()
