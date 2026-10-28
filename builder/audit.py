@@ -28,7 +28,11 @@ SEVERITY_RANK = {"high": 0, "med": 1, "low": 2}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".mypy_cache",
              ".pytest_cache", "site-packages", ".tox", ".idea", ".next"}
 CODE_SUFFIXES = {".py", ".js", ".ts", ".jsx", ".tsx", ".php", ".rb", ".go", ".java", ".sh", ".bash",
-                 ".yaml", ".yml", ".json", ".env", ".cfg", ".ini", ".toml", ".html", ".sql"}
+                 ".yaml", ".yml", ".json", ".env", ".cfg", ".ini", ".toml", ".html", ".htm", ".sql",
+                 ".xml", ".gradle", ".kts", ".properties", ".css", ".lock"}
+# Manifest/lock/config files to inspect for outdated or vulnerable components, by exact name.
+COMPONENT_FILES = {"dockerfile", "composer.json", "package.json", "pom.xml", "build.gradle",
+                   "requirements.txt", ".env", "docker-compose.yml", "docker-compose.yaml"}
 MAX_FILE_BYTES = 1_000_000  # skip anything bigger than ~1 MB (likely data/minified, not hand-written source)
 
 
@@ -154,6 +158,66 @@ RULES: list[Rule] = [
          "Use child_process.execFile/spawn with an args array, not exec with a built string.",
          _rx(r"child_process.*\.exec\s*\(|\brequire\(['\"]child_process['\"]\).*exec\s*\("),
          (".js", ".ts")),
+    # --- more defensive checks (deeper coverage) ---
+    Rule("Hardcoded framework SECRET_KEY", "high",
+         "Load SECRET_KEY from the environment; a committed key lets anyone forge sessions/tokens. Rotate it.",
+         _rx(r"""SECRET_KEY['"\]\s]*[:=,]\s*['"][^'"]{4,}['"]"""), (".py", ".cfg", ".ini", ".env"),
+         unless=_rx(r"(os\.environ|getenv|config\(|example|changeme|your[_-]?|placeholder)")),
+    Rule("Unpickling a file (code execution risk)", "high",
+         "Don't unpickle data you didn't create; use json or a safe schema. pickle can execute code.",
+         _rx(r"(pickle|cPickle)\.load\s*\("), (".py",)),
+    Rule("Archive extractall (zip/tar slip)", "med",
+         "Validate each member path before extracting (no '..' / absolute paths); extractall can overwrite files.",
+         _rx(r"\.extractall\s*\("), (".py",)),
+    Rule("Open redirect from user input", "med",
+         "Don't redirect to a URL taken from the request; allow-list paths or use a fixed destination.",
+         _rx(r"redirect\s*\(\s*request\.(args|form|values|GET|POST)"), (".py",)),
+    Rule("SSRF: fetching a user-supplied URL", "high",
+         "Don't fetch a URL built from request input; allow-list hosts and block internal addresses.",
+         _rx(r"(requests\.(get|post|put|delete|head)|urlopen|urllib\.request\.urlopen)\s*\(\s*request\."),
+         (".py",)),
+    Rule("TLS cert checking disabled (CERT_NONE)", "high",
+         "Don't set verify_mode = CERT_NONE in real use; verify the certificate.",
+         _rx(r"CERT_NONE\b"), (".py",)),
+    Rule("JWT signature verification disabled", "high",
+         "Never set verify_signature False; always verify the token's signature when decoding.",
+         _rx(r"""verify_signature['"]?\s*[:=]\s*(False|false)""")),
+    Rule("Hardcoded Basic auth credentials", "high",
+         "Don't embed a Basic auth header; load credentials from the environment or a secrets store.",
+         _rx(r"""Authorization['"]?\s*[:,]\s*['"]Basic\s+[A-Za-z0-9+/=]{8,}['"]""")),
+    Rule("Weak/broken cipher (DES/RC4)", "high",
+         "DES and RC4 are broken; use AES-GCM (authenticated) with a random nonce.",
+         _rx(r"\b(DES|RC4|ARC4)\b")),
+    Rule("Math.random() for a secret/token", "med",
+         "Math.random() isn't cryptographically secure; use crypto.getRandomValues / crypto.randomUUID.",
+         _rx(r"Math\.random\s*\(\s*\).*(token|password|secret|key|salt|otp|nonce|session|id)"),
+         (".js", ".ts", ".jsx", ".tsx")),
+    Rule("Flask/Jinja autoescape turned off", "high",
+         "Don't disable autoescaping; keep it on and only mark truly-safe, sanitized strings.",
+         _rx(r"autoescape\s*=\s*False"), (".py", ".html")),
+    Rule("Possible path traversal (open with request input)", "high",
+         "Don't build a file path from request input; use a safe base dir and reject '..' / absolute paths.",
+         _rx(r"open\s*\(\s*.*request\.(args|form|values|GET|POST)"), (".py",)),
+    # --- outdated / vulnerable COMPONENTS (OWASP A06): the class behind many real-world breaches ---
+    Rule("Outdated jQuery (1.x/2.x — known XSS)", "med",
+         "Upgrade to jQuery 3.5+; 1.x/2.x have known XSS and prototype-pollution issues (CVE-2019-11358, …).",
+         _rx(r"jquery[-/@]?(1|2)\.\d+(\.\d+)?(\.min)?\.js|jquery@[12]\."), (".html", ".htm", ".js", ".ts")),
+    Rule("End-of-life AngularJS (1.x)", "high",
+         "AngularJS 1.x is end-of-life and no longer patched; migrate to a supported framework.",
+         _rx(r"angularjs|angular@1\.|angular/1\.|angular\.?js['\"?]"), (".html", ".htm", ".js", ".ts")),
+    Rule("End-of-life Bootstrap (<= 3)", "low",
+         "Bootstrap 3 and earlier are unsupported; upgrade to a maintained version.",
+         _rx(r"bootstrap[-/@]?[0-3]\.\d"), (".html", ".htm", ".js", ".css")),
+    Rule("Outdated / vulnerable WordPress core", "high",
+         "This WordPress version is old and has public exploits; update core, themes and plugins now.",
+         _rx(r"""\$wp_version\s*=\s*['"]([0-5])\.\d"""), (".php",)),
+    Rule("Vulnerable Log4j (2.0–2.14 — Log4Shell)", "high",
+         "Upgrade Log4j to 2.17.1+; 2.0–2.14 are vulnerable to Log4Shell (CVE-2021-44228).",
+         _rx(r"log4j-core\D{0,8}2\.(\d|1[0-4])(\.\d+)?\b"),
+         (".xml", ".gradle", ".kts", ".properties", ".txt", ".lock")),
+    Rule("End-of-life Python 2", "med",
+         "Python 2 is end-of-life and unpatched since 2020; move to Python 3.",
+         _rx(r"#!.*\bpython2(\.\d)?\b"), (".py", ".sh", ".bash")),
 ]
 
 # A dependency file is 'unpinned' when a requirement has no exact version — a supply-chain / reproducibility risk.
@@ -189,6 +253,31 @@ def _scan_dependencies(name: str, lines: list[str], filename: str) -> list[Findi
                 out.append(Finding("Unpinned dependency", "low",
                                    "Pin to an exact version (pkg==x.y.z) so builds are reproducible and "
                                    "a malicious release can't slip in.", filename, i))
+    out.extend(_scan_components(name, lines, filename))
+    return out
+
+
+# End-of-life / unsupported base images — software built on these inherits unpatched OS/runtime CVEs.
+_EOL_BASE = re.compile(
+    r"^\s*FROM\s+(?:php:(?:[1-7]\.|5|7)|python:2|python:3\.[0-7]\b|node:(?:[0-9]|1[0-5])\b|"
+    r"ubuntu:(?:1[0-8]|[0-9])\.|debian:(?:[0-9]|10)\b|centos:[0-8]\b|alpine:3\.(?:[0-9]|1[0-2])\b)", re.I)
+
+
+def _scan_components(name: str, lines: list[str], filename: str) -> list[Finding]:
+    """Flag outdated or unsupported runtimes/components in manifests — OWASP A06, a very common breach cause."""
+    out: list[Finding] = []
+    for i, line in enumerate(lines, 1):
+        if name == "dockerfile" and _EOL_BASE.search(line):
+            out.append(Finding("End-of-life base image", "high",
+                               "Build on a currently-supported base image (newer PHP/Python/Node/OS tag); "
+                               "EOL images stop getting security patches and carry known CVEs.", filename, i))
+        if name == "composer.json" and re.search(r'"php"\s*:\s*"[^"]*(?:5\.|7\.)', line):
+            out.append(Finding("Outdated PHP required (EOL)", "high",
+                               "PHP 5 and 7 are end-of-life; require PHP 8.1+ and update the code to match. "
+                               "Old PHP is a top real-world breach vector.", filename, i))
+        if name == "package.json" and re.search(r'"node"\s*:\s*"[^"]*\b(?:[0-9]|1[0-5])\b', line):
+            out.append(Finding("Outdated Node.js engine (EOL)", "med",
+                               "Node 15 and below are end-of-life; target an active LTS (18/20+).", filename, i))
     return out
 
 
@@ -200,7 +289,7 @@ def scan_path(path: str | Path, config) -> list[Finding]:
                                            if p.is_file() and not (SKIP_DIRS & set(p.parts))]
     findings: list[Finding] = []
     for f in files:
-        if f.suffix.lower() not in CODE_SUFFIXES and f.name.lower() not in ("requirements.txt", "dockerfile", ".env"):
+        if f.suffix.lower() not in CODE_SUFFIXES and f.name.lower() not in COMPONENT_FILES:
             continue
         try:
             if f.stat().st_size > MAX_FILE_BYTES:
@@ -223,10 +312,14 @@ describe how to attack anything. End with exactly one line:
 REVIEW_JSON: [{"issue": "...", "severity": "high|med|low", "fix": "..."}]  (use [] if you find nothing)."""
 
 
-def model_findings(text: str, filename: str, generate) -> list[Finding]:
-    """Ask the LOCAL coder model for context-aware defensive findings. generate(prompt)->text. Offline."""
-    from .buildagent import files_from_reply  # unused; kept local imports tidy
-    prompt = f"File: {filename}\n\n```\n{text[:8000]}\n```" + MODEL_REVIEW_CONTRACT
+def model_findings(text: str, filename: str, generate, reference_note: str = "") -> list[Finding]:
+    """Ask the LOCAL coder model for context-aware defensive findings. generate(prompt)->text. Offline.
+
+    ``reference_note`` is relevant passages from Builder's security reference library (OWASP, etc.), so a
+    model that has 'read' them gives sharper, better-grounded findings.
+    """
+    refs = f"\n\nRelevant security knowledge you've studied (apply it):\n{reference_note}\n" if reference_note else ""
+    prompt = f"File: {filename}\n\n```\n{text[:8000]}\n```{refs}" + MODEL_REVIEW_CONTRACT
     try:
         reply = generate(prompt)
     except Exception:  # noqa: BLE001 — a model hiccup must never break the pattern scan
@@ -269,11 +362,12 @@ def dedup(findings: list[Finding]) -> list[Finding]:
     return out
 
 
-def review(path: str | Path, config, generate=None, use_model: bool = True) -> list[Finding]:
+def review(path: str | Path, config, generate=None, use_model: bool = True, memory=None) -> list[Finding]:
     """Full defensive review of a file/folder: the always-on pattern scan, plus the local model if available.
 
     ``generate`` is a ``prompt -> text`` function (the local coder model). Pass ``use_model=False`` or no
-    ``generate`` to run the pattern scan alone — which is the fully-offline, no-model path.
+    ``generate`` to run the pattern scan alone — which is the fully-offline, no-model path. ``memory`` (when
+    given) supplies relevant passages from Builder's security reference library to ground the model pass.
     """
     findings = scan_path(path, config)
     if use_model and generate is not None:
@@ -288,5 +382,12 @@ def review(path: str | Path, config, generate=None, use_model: bool = True) -> l
             except (OSError, UnicodeDecodeError):
                 continue
             rel = str(f.relative_to(root)) if root.is_dir() else f.name
-            findings.extend(model_findings(text, rel, generate))
+            ref_note = ""
+            if memory is not None:
+                try:
+                    ref_note = memory.reference_note(f"security vulnerability review {rel} {text[:200]}",
+                                                     max_chars=1200)
+                except Exception:  # noqa: BLE001
+                    ref_note = ""
+            findings.extend(model_findings(text, rel, generate, reference_note=ref_note))
     return sort_findings(dedup(findings))

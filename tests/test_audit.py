@@ -142,3 +142,47 @@ def test_review_offline_without_a_model(tmp_path):
     cfg = cfg_for(allowed, home=tmp_path)
     findings = audit.review(proj, cfg, generate=None, use_model=False)   # fully offline, no model
     assert any(x.issue == "Hardcoded secret in source" for x in findings)
+
+
+# --------------------------------------------------------------------------- deeper: new rules + components
+def test_detects_more_vulnerability_patterns():
+    i = issues(audit.scan_text(
+        "secret = pickle.load(open('x'))\n"
+        "r = requests.get(request.args['u'])\n"
+        "app.config['SECRET_KEY'] = 'hardcoded-key-123'\n"
+        "ctx.verify_mode = ssl.CERT_NONE\n"
+        "tar.extractall('/tmp')\n", "app.py"))
+    assert "Unpickling a file (code execution risk)" in i
+    assert "SSRF: fetching a user-supplied URL" in i
+    assert "Hardcoded framework SECRET_KEY" in i
+    assert "TLS cert checking disabled (CERT_NONE)" in i
+    assert "Archive extractall (zip/tar slip)" in i
+
+
+def test_detects_outdated_and_vulnerable_components(tmp_path):
+    (tmp_path / "Dockerfile").write_text("FROM php:7.2-apache\n")
+    (tmp_path / "composer.json").write_text('{"require": {"php": ">=7.2"}}')
+    (tmp_path / "package.json").write_text('{"engines": {"node": ">=12"}}')
+    (tmp_path / "index.html").write_text('<script src="jquery-1.11.3.min.js"></script>')
+    (tmp_path / "wp.php").write_text("<?php $wp_version = '4.9';")
+    (tmp_path / "pom.xml").write_text("<version>log4j-core 2.14.1</version>")
+
+    cfg = cfg_for(tmp_path, home=tmp_path)
+    i = issues(audit.scan_path(tmp_path, cfg))
+    assert "End-of-life base image" in i
+    assert "Outdated PHP required (EOL)" in i
+    assert "Outdated Node.js engine (EOL)" in i
+    assert "Outdated jQuery (1.x/2.x — known XSS)" in i
+    assert "Outdated / vulnerable WordPress core" in i
+    assert "Vulnerable Log4j (2.0–2.14 — Log4Shell)" in i
+
+
+def test_reference_library_grounds_the_model_review():
+    seen = {}
+    def fake_generate(prompt):
+        seen["prompt"] = prompt
+        return 'REVIEW_JSON: [{"issue":"x","severity":"low","fix":"y"}]'
+    audit.model_findings("code here", "a.py", fake_generate,
+                         reference_note="OWASP: validate all redirects against an allow-list.")
+    assert "security knowledge you've studied" in seen["prompt"]
+    assert "allow-list" in seen["prompt"]

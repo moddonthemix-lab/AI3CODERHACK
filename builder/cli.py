@@ -273,7 +273,7 @@ def _cmd_review(args, config, db, memory, llm) -> int:
                              {"role": "user", "content": prompt}]).get("content", "")
 
     try:
-        findings = audit.review(path, config, generate=generate, use_model=generate is not None)
+        findings = audit.review(path, config, generate=generate, use_model=generate is not None, memory=memory)
     except ScopeError as e:
         err(f"✗ {e}\n  Set BUILDER_CODE_DIRS to the folders Builder may review (e.g. ~/Projects).")
         return 1
