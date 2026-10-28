@@ -59,6 +59,17 @@ CREATE TABLE IF NOT EXISTS user_templates (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+-- Reference library: text the boss uploaded for Builder to learn from (coding books, references, notes),
+-- split into passages and keyword-retrieved into build/edit prompts. Offline, no embeddings.
+CREATE TABLE IF NOT EXISTS refs (
+    id          INTEGER PRIMARY KEY,
+    source      TEXT NOT NULL,                  -- the file/document name
+    title       TEXT NOT NULL DEFAULT '',       -- a friendly title (defaults to the file name)
+    chunk_no    INTEGER NOT NULL DEFAULT 0,     -- position of this passage within the document
+    text        TEXT NOT NULL,                  -- the passage itself
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
 -- Learning from experience: the boss's feedback and preferences.
 CREATE TABLE IF NOT EXISTS lessons (
     id          INTEGER PRIMARY KEY,
@@ -232,6 +243,35 @@ class Store:
         with self.conn:
             return self.conn.execute("DELETE FROM user_templates WHERE name = ?", (name.strip(),)).rowcount > 0
 
+    # ------------------------------------------------------------------ reference library
+    def add_ref(self, source: str, title: str, chunk_no: int, text: str) -> int:
+        return self._insert("INSERT INTO refs(source, title, chunk_no, text) VALUES (?, ?, ?, ?)",
+                            (source, title, chunk_no, text))
+
+    def delete_refs(self, source: str) -> int:
+        """Remove every passage from one document. Returns how many were removed."""
+        with self.conn:
+            return self.conn.execute("DELETE FROM refs WHERE source = ?", (source,)).rowcount
+
+    def ref_sources(self) -> list[dict]:
+        """Each uploaded document with its passage count — for the 'what he's read' list."""
+        return _rows(self.conn.execute(
+            "SELECT source, MAX(title) AS title, COUNT(*) AS chunks, MIN(created_at) AS created_at "
+            "FROM refs GROUP BY source ORDER BY created_at DESC"))
+
+    def refs_matching(self, words: list[str], limit: int = 40) -> list[dict]:
+        """Passages whose text contains any of ``words`` (candidate set for keyword scoring). Bounded."""
+        words = [w for w in words if w][:8]
+        if not words:
+            return []
+        where = " OR ".join("text LIKE ?" for _ in words)
+        params = [f"%{w}%" for w in words] + [limit]
+        return _rows(self.conn.execute(
+            f"SELECT * FROM refs WHERE {where} ORDER BY id LIMIT ?", params))
+
+    def ref_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM refs").fetchone()[0]
+
     # ------------------------------------------------------------------ lessons
     def add_lesson(self, text: str, kind: str = "preference", topic: str = "general",
                    origin: str = "user", ref: str = "") -> int:
@@ -330,6 +370,8 @@ class Store:
             "builds": one("SELECT COUNT(*) FROM builds"),
             "builds_passed": one("SELECT COUNT(*) FROM builds WHERE ok = 1"),
             "lessons": one("SELECT COUNT(*) FROM lessons WHERE active = 1"),
+            "refs": one("SELECT COUNT(*) FROM refs"),
+            "ref_docs": one("SELECT COUNT(DISTINCT source) FROM refs"),
             "lab_targets": one("SELECT COUNT(*) FROM lab_authorizations WHERE active = 1"),
             "pending": one("SELECT COUNT(*) FROM pending WHERE done_at IS NULL"),
             "unread": one("SELECT COUNT(*) FROM inbox WHERE read = 0"),

@@ -113,6 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("forget", help="Delete a note by id")
     s.add_argument("id", type=int)
 
+    s = sub.add_parser("learn-doc", help="Teach Builder from a document (a coding book, reference or notes) — he refers to it when building")
+    s.add_argument("path", help="path to a .txt/.md/.py/.html/… file, or a .pdf (needs: pip install 'builder[docs]')")
+    s.add_argument("--title", default="", help="a friendly title (defaults to the file name)")
+    s = sub.add_parser("refs", help="The documents Builder has read (his reference library)")
+    s.add_argument("--forget", metavar="SOURCE", help="remove a document by its name (as shown in the list)")
+
     sub.add_parser("pending", help="Work parked while offline")
     sub.add_parser("card", help="Builder's identity card and store stats")
 
@@ -508,6 +514,25 @@ def main(argv: list[str] | None = None) -> int:
             _print_rows(db.recall(" ".join(args.query), limit=20), ["id", "topic", "created_at", "content"], 90)
         elif cmd == "forget":
             print("forgotten" if db.forget(args.id) else "no note with that id")
+        elif cmd == "learn-doc":
+            from .references import ReferenceError
+            try:
+                info = memory.learn_doc(args.path, title=args.title)
+            except ReferenceError as e:
+                print(f"✗ {e}", file=sys.stderr)
+                return 1
+            print(f"✓ Learned '{info['title']}' — {info['chunks']} passage(s) stored. "
+                  f"Builder will refer to it when building (offline too).")
+        elif cmd == "refs":
+            if args.forget:
+                n = memory.forget_doc(args.forget)
+                print(f"removed '{args.forget}' ({n} passage(s))" if n else f"no document named '{args.forget}'")
+            else:
+                docs = memory.documents()
+                if not docs:
+                    print("No reference documents yet. Add one:  builder learn-doc <file>")
+                else:
+                    _print_rows(docs, ["source", "title", "chunks", "created_at"], 50)
         elif cmd == "pending":
             _print_rows(db.pending(), ["id", "kind", "origin", "asked_at", "depth", "text"], 90)
         elif cmd == "card":

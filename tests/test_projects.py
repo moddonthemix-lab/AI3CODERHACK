@@ -281,6 +281,7 @@ def test_game_build_ignores_a_poisoned_recalled_solution(tmp_path):
     class PoisonedMemory:
         def as_prompt(self, *a, **k): return ""
         def recall(self, *a, **k): return []
+        def reference_note(self, *a, **k): return ""
         def recall_solution(self, task):
             return {"task": "old game", "files": {"index.html": "<canvas></canvas> Eat the red dots"}}
         def remember_build(self, *a, **k): pass

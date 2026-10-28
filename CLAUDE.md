@@ -17,7 +17,10 @@ family's cloud brain when configured, but never needs it.
   - `safety.py` — the two security modes, the enforced gates, and the audit log.
   - `config.py`, `agent.py`, `server.py`, `cli.py`, `memory.py`, `db.py`, `llm.py`, `bench.py`.
   - `memory.py` — lean, keyword-based memory (lessons + past security findings); works offline, no
-    embeddings. `assistant.py` — the chat loop (memory-aware, no research tools). `offline.py` — queue
+    embeddings. `references.py` — the reference library: documents the owner uploads (coding books,
+    notes) are chunked, keyword-indexed in the `refs` table, and relevant passages are injected into
+    build/edit prompts. Text/code files are stdlib; PDFs use the optional `builder[docs]` extra (pypdf).
+    `assistant.py` — the chat loop (memory-aware, no research tools). `offline.py` — queue
     work while offline and resume. `voice.py` — optional voice.
 - `hub_client.py`, `family_brain.py` — **copied verbatim** from the hub repo
   (`moddonthemix-lab/AIFAMINTERFACE`). Never edit here; update by re-copying.

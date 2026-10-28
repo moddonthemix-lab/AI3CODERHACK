@@ -110,6 +110,22 @@ builder preview ~/Projects/pong                 # see the change (undo with --un
 ```
 
 He reads the current files, changes only what your request needs, re-runs the tests, and shows the diff.
+For edits he uses the **stronger model first** (following the instruction matters more than speed there),
+and if he genuinely can't apply the change he **leaves your project untouched and says so** — he never
+reports a silent "no changes" as a success.
+
+**Teach him from your own books and references.** Upload coding books, references or notes and he pulls the
+relevant passages into his build/edit prompts — so he gets better at the kinds of projects *you* build,
+all offline:
+
+```bash
+builder learn-doc ~/Books/game-programming-patterns.txt
+builder learn-doc ~/notes/our-coding-style.md --title "House style"
+builder refs                                    # everything he's read
+```
+
+Text and code files need nothing extra; PDFs need one small optional library (`pip install 'builder[docs]'`).
+There's an upload box in the dashboard too.
 
 ### Review your own code
 
@@ -162,6 +178,8 @@ Every endpoint stays inside the scope and the gates above.
 | `builder lab status\|on\|off\|log` | Authorized-lab mode and its audit log |
 | `builder doctor` | Check Ollama, the models, the sandbox, the build-and-test pipeline, and the code-folder scope |
 | `builder bench` | Measure models on this machine and pick the best coder model |
+| `builder learn-doc <file>` | Teach him from a document (coding book, reference, notes) — he pulls the relevant parts into his builds. Text/code files work as-is; PDFs need `pip install 'builder[docs]'` |
+| `builder refs` / `builder refs --forget <name>` | The documents he's read (his reference library) |
 | `builder feedback "<lesson>"` / `builder remember "<note>"` | Teach him — he applies it to every build (offline) |
 | `builder chat` | Talk to Builder in the terminal |
 | `builder serve` | Start the HTTP API + dashboard |

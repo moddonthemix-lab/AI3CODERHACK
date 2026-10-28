@@ -44,6 +44,27 @@ class Memory:
         blob = json.dumps(files) if (ok and files) else ""
         return self.db.add_build(task, dir, ok, attempts, problem, blob)
 
+    # ------------------------------------------------------------------ reference library
+    def learn_doc(self, path: str, title: str = "") -> dict:
+        """Read a document the boss uploaded and store its passages for Builder to refer to (offline)."""
+        from . import references
+        return references.ingest(self.db, path, title=title)
+
+    def reference_note(self, task: str, max_chars: int = 1800) -> str:
+        """The passages from the reference library most relevant to ``task``, rendered for the prompt."""
+        from . import references
+        try:
+            return references.as_prompt(references.recall(self.db, task), max_chars=max_chars)
+        except Exception:  # noqa: BLE001 — reference recall must never break a build
+            return ""
+
+    def documents(self) -> list[dict]:
+        """The documents Builder has read (name, title, passage count)."""
+        return self.db.ref_sources()
+
+    def forget_doc(self, source: str) -> int:
+        return self.db.delete_refs(source)
+
     def recall_solution(self, task: str) -> dict | None:
         """The closest PAST build that passed, as {task, files} — so a similar new build adapts instead of starting over."""
         import json

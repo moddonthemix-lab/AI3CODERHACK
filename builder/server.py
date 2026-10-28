@@ -186,6 +186,8 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                     return self._send(200, store.pending(qs.get("all") in ("1", "true")))
                 if url.path == "/api/lab":
                     return self._send(200, {"targets": store.lab_targets(True), "log": store.safety_events(20)})
+                if url.path == "/api/refs":
+                    return self._send(200, store.ref_sources())
                 if url.path == "/api/templates":
                     from .templates import template_names
                     return self._send(200, template_names(store))
@@ -334,7 +336,46 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                     return self._send(502, {"error": str(e)})
                 return self._send(200, {"from": CARD["id"], "ok": result["ok"], "attempts": result["attempts"],
                                         "diff": result["diff"], "dir": str(proj.root),
-                                        "no_change": bool(result.get("no_change"))})
+                                        "no_change": bool(result.get("no_change")),
+                                        "used_template": bool(result.get("used_template"))})
+            if path == "/api/learn-doc" and body.get("name") and body.get("b64") is not None:
+                # Teach Builder from an uploaded document: decode bytes to a temp file, read + chunk it, store
+                # its passages under the real file name, then delete the temp file.
+                import base64 as _b64
+                import os as _os
+                import tempfile as _tmp
+                from .references import ReferenceError, chunk_text, read_document
+                if memory is None:
+                    return self._send(503, {"error": "builder memory not configured"})
+                name = _os.path.basename(str(body["name"])) or "upload"
+                title = str(body.get("title") or name)
+                try:
+                    raw = _b64.b64decode(body["b64"], validate=False)
+                except (ValueError, TypeError):
+                    return self._send(400, {"error": "bad file data"})
+                if len(raw) > 8_000_000:
+                    return self._send(413, {"error": "that file is too large (max 8 MB)"})
+                fd, tmp = _tmp.mkstemp(suffix=_os.path.splitext(name)[1])
+                try:
+                    with _os.fdopen(fd, "wb") as fh:
+                        fh.write(raw)
+                    _, text = read_document(tmp)                 # raises ReferenceError with a clear reason
+                    chunks = chunk_text(text)
+                    if not chunks:
+                        return self._send(400, {"error": f"'{name}' has no readable text to learn from"})
+                    store.delete_refs(name)                      # re-uploading refreshes it
+                    for i, ch in enumerate(chunks):
+                        store.add_ref(name, title, i, ch)
+                    return self._send(201, {"source": name, "title": title, "chunks": len(chunks)})
+                except ReferenceError as e:
+                    return self._send(400, {"error": str(e)})
+                finally:
+                    try:
+                        _os.unlink(tmp)
+                    except OSError:
+                        pass
+            if path == "/api/refs/forget" and body.get("source"):
+                return self._send(200, {"removed": store.delete_refs(str(body["source"]))})
             with lock:
                 if path == "/api/inbox/read":
                     return self._send(200, {"marked": store.mark_read(body.get("id"))})

@@ -66,6 +66,59 @@ _GAME_TEST = """def test_game_has_the_essentials():
     assert 'getContext' in html
 """
 
+# ---------------------------------------------------------------- neutral GAME STARTER (honest fallback)
+# When Builder is asked for a game he has no specific template for (space invaders, asteroids, …) and the
+# model can't build it, he drops in THIS — a clearly-labelled blank canvas starter, NOT a snake pretending
+# to be the game you asked for. It runs, so you have something to build on, and it says what it is.
+_STARTER_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Game Starter</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:sans-serif;text-align:center}
+canvas{background:#000;display:block;margin:12px auto;border:2px solid #333}
+.note{color:#9aa7b5;max-width:460px;margin:0 auto}</style></head>
+<body>
+<h1>Game Starter</h1>
+<p class="note">This is a blank game starter, not a finished game. Move the square with the arrow keys.
+Ask Builder to turn it into the game you want (e.g. "add invaders that move down and shoot").</p>
+<canvas id="game" width="480" height="360"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let player = {x: 230, y: 320, w: 20, h: 20};
+let score = 0;
+let left = false, right = false, up = false, down = false;
+function update() {
+  if (left) player.x -= 4;
+  if (right) player.x += 4;
+  if (up) player.y -= 4;
+  if (down) player.y += 4;
+  player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+  player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
+}
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#4da3ff';
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+  ctx.fillStyle = '#fff'; ctx.font = '16px sans-serif';
+  ctx.fillText('Score: ' + score, 10, 20);
+}
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowLeft') left = true;
+  if (e.key === 'ArrowRight') right = true;
+  if (e.key === 'ArrowUp') up = true;
+  if (e.key === 'ArrowDown') down = true;
+});
+document.addEventListener('keyup', function (e) {
+  if (e.key === 'ArrowLeft') left = false;
+  if (e.key === 'ArrowRight') right = false;
+  if (e.key === 'ArrowUp') up = false;
+  if (e.key === 'ArrowDown') down = false;
+});
+loop();
+</script>
+</body></html>
+"""
+
 # ---------------------------------------------------------------- pong (two paddles, bouncing ball)
 _PONG_HTML = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Pong</title>
@@ -351,8 +404,8 @@ def test_add():
 
 
 TEMPLATES = {
-    "game": {"desc": "A playable arrow-key canvas game (index.html) + a test",
-             "files": {"index.html": _GAME_HTML, "test_game.py": _GAME_TEST}},
+    "game": {"desc": "A blank canvas game starter (index.html) + a test — a base to build any game on",
+             "files": {"index.html": _STARTER_HTML, "test_game.py": _GAME_TEST}},
     "snake": {"desc": "Classic Snake — move with arrows, eat dots to score (index.html) + a test",
               "files": {"index.html": _GAME_HTML, "test_game.py": _GAME_TEST}},
     "pong": {"desc": "Pong — your paddle vs the CPU, bouncing ball, score (index.html) + a test",

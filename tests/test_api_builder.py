@@ -72,3 +72,33 @@ def test_preview_serves_a_built_site_in_scope_and_refuses_outside(tmp_path):
             assert e.code == 403                                   # outside the workspace -> refused
     finally:
         httpd.shutdown()
+
+
+def test_learn_doc_upload_list_and_forget(tmp_path):
+    import base64
+    from builder.memory import Memory
+    cfg = Config(home=tmp_path, code_dirs=[str(tmp_path)])
+    store = Store(cfg.db_path)
+    memory = Memory(store, None, cfg)
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(store, FakeAssistant(cfg), token="", memory=memory))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        content = b"Pong needs two paddles and a bouncing ball. Space invaders has marching aliens."
+        status, body = _req(base + "/api/learn-doc", "POST",
+                            {"name": "guide.txt", "b64": base64.b64encode(content).decode()})
+        assert status == 201 and body["chunks"] >= 1 and body["source"] == "guide.txt"
+
+        status, docs = _req(base + "/api/refs")
+        assert status == 200 and any(d["source"] == "guide.txt" for d in docs)
+
+        # the uploaded passage is now recallable for a related build
+        assert "aliens" in memory.reference_note("space invaders").lower()
+
+        status, body = _req(base + "/api/refs/forget", "POST", {"source": "guide.txt"})
+        assert status == 200 and body["removed"] >= 1
+        _, docs = _req(base + "/api/refs")
+        assert docs == []
+    finally:
+        httpd.shutdown()

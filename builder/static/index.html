@@ -96,6 +96,17 @@
   </div>
 
   <div class="panel">
+    <h2>Teach him from a document <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">— upload a coding book/reference; he pulls the relevant parts into his builds (offline)</span></h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="file" id="docfile" style="flex:1;min-width:160px">
+      <button onclick="learnDoc()" id="docbtn">Upload &amp; learn</button>
+    </div>
+    <div style="color:var(--dim);font-size:12px;margin-top:6px">Text/code files (.txt .md .py .html .json …) work as-is. PDFs need <code>pip install 'builder[docs]'</code>. Max 8 MB.</div>
+    <div id="docout" style="font-size:13px;margin-top:8px"></div>
+    <div id="refs" style="margin-top:10px"><span class="empty">no documents yet</span></div>
+  </div>
+
+  <div class="panel">
     <h2>What he knows <span style="color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">— lessons &amp; notes he applies to your work (offline)</span></h2>
     <div id="knows"><span class="empty">nothing yet — teach him with <code>builder feedback "…"</code> or <code>builder remember "…"</code></span></div>
   </div>
@@ -156,9 +167,44 @@ async function refresh() {
         `<span style="color:var(--dim)"> · ${esc(n.topic)}</span></div>`));
     $("knows").innerHTML = items.length ? items.join("")
       : `<span class="empty">nothing yet — teach him with <code>builder feedback "…"</code> or <code>builder remember "…"</code></span>`;
+    await refreshRefs();
   } catch (e) {
     $("status").textContent = "can't reach Builder";
   }
+}
+async function refreshRefs() {
+  const docs = await api("/api/refs");
+  $("refs").innerHTML = (docs && docs.length) ? docs.map(d =>
+    `<div class="rev"><span class="sev low">READ</span><b>${esc(d.title || d.source)}</b>` +
+    `<span style="color:var(--dim)"> · ${d.chunks} passage${d.chunks === 1 ? "" : "s"}</span>` +
+    ` <a href="#" onclick="forgetDoc('${esc(d.source)}');return false" style="color:var(--dim)">forget ✕</a></div>`).join("")
+    : `<span class="empty">no documents yet</span>`;
+}
+async function learnDoc() {
+  const f = $("docfile").files[0];
+  if (!f) { $("docout").textContent = "Pick a file first."; return; }
+  if (f.size > 8000000) { $("docout").textContent = "✗ that file is too big (max 8 MB)."; return; }
+  $("docbtn").disabled = true;
+  $("docout").textContent = "Reading " + f.name + " …";
+  try {
+    const b64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(",")[1] || "");
+      r.onerror = () => rej(r.error);
+      r.readAsDataURL(f);
+    });
+    const r = await api("/api/learn-doc", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: f.name, b64: b64 }) });
+    $("docout").textContent = r.error ? ("✗ " + r.error)
+      : `✓ Learned "${r.title}" — ${r.chunks} passage(s). He'll refer to it when building.`;
+    if (!r.error) { $("docfile").value = ""; refreshRefs(); }
+  } catch (e) { $("docout").textContent = "error: " + e; }
+  $("docbtn").disabled = false;
+}
+async function forgetDoc(source) {
+  await api("/api/refs/forget", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source: source }) });
+  refreshRefs();
 }
 async function ask() {
   const text = $("q").value.trim(); if (!text) return;
@@ -189,8 +235,12 @@ async function build() {
     }
     else {
       const prev = `  <a href="/preview?path=${encodeURIComponent(r.dir)}&_=${Date.now()}" target="_blank" style="color:var(--accent)">Open preview ↗</a>`;
+      const warn = r.used_template
+        ? "<br>⚠ He couldn't build that one from scratch, so this is a <b>working starter</b> to build on — " +
+          "try a simpler phrasing, or ask him to add pieces one at a time.<br>"
+        : "";
       $("bout").innerHTML = esc((r.ok ? "✓ tests pass" : "✗ tests still failing") + " after " + r.attempts +
-        " attempt(s) in " + r.dir).replace(/\n/g, "<br>") + prev + "<br><br>" + esc(r.diff || "(no changes)").replace(/\n/g, "<br>");
+        " attempt(s) in " + r.dir).replace(/\n/g, "<br>") + prev + warn + "<br><br>" + esc(r.diff || "(no changes)").replace(/\n/g, "<br>");
       refresh();
     }
   } catch (e) { $("bout").textContent = "error: " + e; }

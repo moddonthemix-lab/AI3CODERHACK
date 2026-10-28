@@ -187,6 +187,13 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     from .projects import build_and_test, problem_signature
 
     note = memory.as_prompt(memory.recall(task), max_chars=1500) if memory is not None else ""
+    if memory is not None:
+        # Pull in relevant passages from the boss's uploaded reference library (coding books, notes), so
+        # Builder's code is informed by what he's been taught. Offline, keyword-based.
+        ref_note = memory.reference_note(task, max_chars=1800)
+        if ref_note:
+            note = (note + "\n\n" + ref_note) if note else ref_note
+            log("  (using relevant passages from your reference library)")
 
     # If the folder ALREADY has a project in it, Builder MODIFIES it: its current files become the starting
     # point, so "make the ball faster" / "add a second paddle" adapts the real code instead of starting over.
@@ -213,25 +220,37 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     def changed_nothing() -> bool:
         return not (project.diff() or "").strip()
 
-    propose = make_propose(_generator(llm), task, log=log, memory_note=note, starter=starter, is_modify=is_modify)
+    # For an EDIT, following the instruction matters more than speed, so use the STRONGER model first when
+    # we have one (the fast model is the one that keeps "changing nothing"). A fresh build keeps the fast
+    # model first with the stronger one as the fallback.
+    primary, secondary = llm, fallback_llm
+    if is_modify and fallback_llm is not None:
+        try:
+            if fallback_llm.available():
+                primary, secondary = fallback_llm, llm
+                log("  (edit — using the stronger model first so the change actually gets applied)")
+        except Exception:  # noqa: BLE001
+            pass
+
+    propose = make_propose(_generator(primary), task, log=log, memory_note=note, starter=starter,
+                           is_modify=is_modify)
     result = build_and_test(project, propose, test_cmd=test_cmd, max_tries=tries, log=log)
 
-    # In MODIFY mode, "tests pass but nothing actually changed" is NOT success — the weak model often just
-    # echoes the file back or only talks. Treat that like a failure so we escalate to the stronger model.
+    # If the primary couldn't do it (or, for an edit, changed nothing), try the OTHER model.
     no_change = is_modify and changed_nothing()
-    if (not result["ok"] or no_change) and fallback_llm is not None:
+    if (not result["ok"] or no_change) and secondary is not None:
         try:
-            available = fallback_llm.available()
+            available = secondary.available()
         except Exception:  # noqa: BLE001
             available = False
         if available:
-            log("  the fast model didn't apply the change — retrying with the stronger model (slower)…"
+            log("  that didn't apply the change — trying the other model…"
                 if no_change else
-                "  the fast model couldn't finish it — retrying with the stronger model (slower)…")
+                "  that model couldn't finish it — trying the other model…")
             current = {name: project.read(name) for name in project.changed()}
             files2 = current or (starter or {}).get("files", {})
             starter2 = {"task": (starter or {}).get("task", task), "files": files2} if files2 else starter
-            propose2 = make_propose(_generator(fallback_llm), task, log=log, memory_note=note,
+            propose2 = make_propose(_generator(secondary), task, log=log, memory_note=note,
                                     starter=starter2, is_modify=is_modify)
             result = build_and_test(project, propose2, test_cmd=test_cmd, max_tries=tries, log=log)
             no_change = is_modify and changed_nothing()
