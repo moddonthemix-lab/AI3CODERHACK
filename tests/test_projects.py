@@ -264,6 +264,35 @@ def test_build_in_an_existing_folder_adapts_what_is_there(tmp_path):
     assert "modify it" in seen[0]
 
 
+def test_game_build_ignores_a_poisoned_recalled_solution(tmp_path):
+    # Regression: an old build that fell back to a generic template used to be recalled for every game,
+    # dragging "a pong game" back to the generic starter. A game must start from its OWN template instead.
+    from builder.buildagent import run_build
+
+    class Cfg:
+        code_dirs = [str(tmp_path)]
+
+    proj = Project(tmp_path / "pong-fresh", Cfg())
+
+    class PoisonedMemory:
+        def as_prompt(self, *a, **k): return ""
+        def recall(self, *a, **k): return []
+        def recall_solution(self, task):
+            return {"task": "old game", "files": {"index.html": "<canvas></canvas> Eat the red dots"}}
+        def remember_build(self, *a, **k): pass
+
+    seen = []
+    class LLM:
+        def available(self): return True
+        def chat(self, msgs):
+            seen.append(msgs[-1]["content"])
+            return {"content": "ok\nFILES_JSON: {}"}
+
+    run_build("a space pong game", proj, LLM(), memory=PoisonedMemory(), tries=1, log=lambda m: None)
+    assert "playerY" in seen[0] and "cpuY" in seen[0]      # real Pong template was used
+    assert "Eat the red dots" not in seen[0]               # NOT the poisoned recalled generic game
+
+
 # --------------------------------------------------------------------------- persisted undo
 def test_save_and_restore_backup_across_runs(tmp_path):
     allowed = tmp_path / "Projects"

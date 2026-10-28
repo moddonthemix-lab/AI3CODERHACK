@@ -190,6 +190,7 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
 
     # If the folder ALREADY has a project in it, Builder MODIFIES it: its current files become the starting
     # point, so "make the ball faster" / "add a second paddle" adapts the real code instead of starting over.
+    kind = classify(task)
     starter = None
     try:
         existing = project.existing_files()
@@ -198,9 +199,12 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     if existing:
         log("  (this folder already has a project — adapting what's there instead of starting fresh)")
         starter = {"task": f"the existing project in this folder (modify it): {task}", "files": existing}
-    elif memory is not None:
+    elif memory is not None and kind != "game":
+        # For a GAME the specific built-in template (pong/snake/breakout) is the authoritative starting
+        # point, so we DON'T pull a remembered past build in — that's what used to drag every "pong" back
+        # to an old generic game. For everything else, reuse a close past solution when there is one.
         try:
-            starter = memory.recall_solution(task)   # no project here yet — reuse a close past build if any
+            starter = memory.recall_solution(task)
         except Exception:  # noqa: BLE001
             starter = None
 
@@ -223,7 +227,12 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     # (or the reused past solution) and ship that — so a build ALWAYS leaves a runnable result.
     if not result["ok"]:
         from . import sandbox
-        baseline = starter["files"] if (starter and starter.get("files")) else template_files(classify(task))
+        if starter and starter.get("files"):
+            baseline = starter["files"]
+        elif kind == "game":
+            baseline = template_files(game_template_for(task))   # the SPECIFIC game, not a generic one
+        else:
+            baseline = template_files(kind)
         if baseline:
             log("  couldn't get the model's version to pass — using a clean working template so you still "
                 "get something that runs.")
@@ -234,7 +243,11 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
 
     if memory is not None:
         try:
-            files = {name: project.read(name) for name in project.changed()} if result["ok"] else None
+            # Only remember the FILES as a reusable solution when the model actually produced a passing
+            # project — never when we fell back to the built-in template. Saving the template as a
+            # "solution" is what poisoned future builds (every pong recalled an old generic game).
+            save_files = result["ok"] and not result.get("used_template")
+            files = {name: project.read(name) for name in project.changed()} if save_files else None
             memory.remember_build(task, str(project.root), result["ok"], result["attempts"],
                                   problem_signature(result.get("failures", [])), files=files)
         except Exception:  # noqa: BLE001 — recording must never fail a build
@@ -290,7 +303,7 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
     files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in baseline_files.items())
     starter_block = (f"\n\nHere is a WORKING starting point ({baseline_task!r}) that already runs and passes "
                      f"its test — ADAPT it to the task, keeping what works (don't start from scratch):\n{files_txt[:8000]}")
-    log("  (starting from a working template and adapting it)")
+    log(f"  (starting from {baseline_task or 'a working template'} and adapting it)")
 
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
