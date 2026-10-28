@@ -76,7 +76,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("target", help="the authorized target (must already be on record via 'lab on')")
     run.add_argument("args", nargs="*", help="extra flags for the tool (the target is added automatically)")
     run.add_argument("--yes", action="store_true", help="skip the per-run confirmation (still logged)")
-    labsub.add_parser("tools", help="list the recon/enum tools Builder can run (and which are installed)")
+    labsub.add_parser("tools", help="list the recon/enum/exploit tools Builder can run (and which are installed)")
+    loc = labsub.add_parser("local", help="run a LOCAL exploit helper (searchsploit, msfvenom, john, hashcat, hashid)")
+    loc.add_argument("tool")
+    loc.add_argument("args", nargs="*")
+    loc.add_argument("--yes", action="store_true", help="skip the per-run confirmation (still logged)")
+    pay = labsub.add_parser("payload", help="generate a reverse-shell one-liner for an authorized box")
+    pay.add_argument("--lhost", required=True, help="YOUR IP (where the shell connects back)")
+    pay.add_argument("--lport", type=int, default=4444, help="your listener port (default 4444)")
+    pay.add_argument("--type", default="bash", help="bash, nc-mkfifo, python3, php, perl, powershell, … (all = show all)")
+    lis = labsub.add_parser("listen", help="catch a reverse shell with a netcat listener (foreground)")
+    lis.add_argument("port", type=int, nargs="?", default=4444)
 
     sub.add_parser("doctor", help="Check Ollama, the coder models, the sandbox and the code-folder scope")
 
@@ -347,11 +357,18 @@ def _cmd_lab(args, config, db) -> int:
         _print_rows(db.safety_events(args.limit), ["at", "action", "decision", "target", "detail", "reason"], width=40)
         return 0
     if action == "tools":
-        from .labtools import TOOLS, tool_available
-        print("Recon / enumeration tools Builder can run against an authorized target:\n")
-        for name, desc in sorted(TOOLS.items()):
+        from .labtools import EXPLOIT_TOOLS, LOCAL_TOOLS, TOOLS, tool_available
+        recon = {k: v for k, v in TOOLS.items() if k not in EXPLOIT_TOOLS}
+        print("RECON / ENUMERATION (builder lab run <tool> <target> [flags]):\n")
+        for name, desc in sorted(recon.items()):
             print(f"  {'✓' if tool_available(name) else '·'} {name:14} {desc}")
-        print("\n  ✓ = installed.  Run one with:  builder lab run <tool> <target> [flags]")
+        print("\nEXPLOITATION, aimed at the target (builder lab run <tool> <target> [flags]):\n")
+        for name, desc in sorted(EXPLOIT_TOOLS.items()):
+            print(f"  {'✓' if tool_available(name) else '·'} {name:14} {desc}")
+        print("\nLOCAL helpers (builder lab local <tool> [args]):\n")
+        for name, desc in sorted(LOCAL_TOOLS.items()):
+            print(f"  {'✓' if tool_available(name) else '·'} {name:14} {desc}")
+        print("\n  ✓ = installed. Also: builder lab payload --lhost <you> --lport <p> | builder lab listen <p>")
         return 0
     if action == "run":
         from .labtools import LabToolError, run_tool
@@ -374,6 +391,48 @@ def _cmd_lab(args, config, db) -> int:
         print(result["output"] or "(no output)")
         err(f"\n✓ {result['tool']} finished in {result['seconds']}s (logged). Next: ask Builder what the "
             f"results mean and what to try next.")
+        return 0
+    if action == "local":
+        from .labtools import LabToolError, run_local_tool
+        from .safety import LabModeOff, SafetyError
+
+        def approve(kind, detail, target):
+            if args.yes:
+                return True
+            return input(f"  Run `{args.tool} {' '.join(args.args)}` locally? [y/N] ").strip().lower() in ("y", "yes")
+
+        try:
+            result = run_local_tool(config, db, args.tool, args.args, approve=approve, log=err)
+        except (LabModeOff, LabToolError, SafetyError) as e:
+            err(f"✗ {e}")
+            return 1
+        print(result["output"] or "(no output)")
+        return 0
+    if action == "payload":
+        from .labtools import REV_SHELLS, LabToolError, make_payload
+        from .safety import LabModeOff
+        if args.type == "all":
+            try:
+                for k in sorted(REV_SHELLS):
+                    print(f"# {k}\n{make_payload(config, db, args.lhost, args.lport, k)}\n")
+            except (LabModeOff, LabToolError) as e:
+                err(f"✗ {e}"); return 1
+            return 0
+        try:
+            print(make_payload(config, db, args.lhost, args.lport, args.type))
+        except (LabModeOff, LabToolError) as e:
+            err(f"✗ {e}")
+            return 1
+        err("\n  Catch it with:  builder lab listen " + str(args.lport))
+        return 0
+    if action == "listen":
+        from .labtools import LabToolError, start_listener
+        from .safety import LabModeOff, SafetyError
+        try:
+            start_listener(config, db, args.port, approve=lambda *a: True, log=err)
+        except (LabModeOff, LabToolError, SafetyError) as e:
+            err(f"✗ {e}")
+            return 1
         return 0
     return 0
 

