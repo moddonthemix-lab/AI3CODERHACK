@@ -232,7 +232,10 @@ def run_tests(project_dir: Path, cmd: list[str] | None = None, timeout: int = 18
         return {"ok": False, "exit_code": None, "stdout": "", "cmd": None, "timed_out": False,
                 "stderr": "No test command found (no pytest/tests, package.json test script, or Makefile test target)."}
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(project_dir),
-           "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1"}
+           "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1",
+           # Let pygame-based tests import and run with no real display/audio (headless sandbox), and skip
+           # its startup banner. Harmless for projects that don't use pygame.
+           "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "PYGAME_HIDE_SUPPORT_PROMPT": "1"}
 
     # If the test command is pytest but pytest isn't installed, use the built-in dependency-free runner,
     # so builds don't fail just because the user hasn't `pip install pytest`.

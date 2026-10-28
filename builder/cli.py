@@ -475,7 +475,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"✓ Created a working '{args.kind}' project in {proj.root}:")
             for name in files:
                 print(f"    {name}")
-            print(f"\nTry it:  builder preview {args.dir}        (for a game/website)")
+            main_py = next((n for n in ("game.py", "app.py", "main.py", "tool.py") if n in files), None)
+            if "index.html" in files:
+                print(f"\nTry it:  builder preview {args.dir}        (opens it in your browser)")
+            elif main_py:
+                print(f"\nRun it:  cd {args.dir} && python {main_py}")
             print(f"Improve it:  builder build \"<what to change>\" --dir {args.dir}")
         elif cmd == "preview":
             import webbrowser

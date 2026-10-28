@@ -14,6 +14,7 @@ dependencies = []  # core runs on the standard library + Ollama
 voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24", "soundfile>=0.12", "piper-tts>=1.2"]
 cloud = ["anthropic>=0.40"]                          # family cloud brain (Claude); local mode needs nothing
 docs = ["pypdf>=4"]                                   # read PDFs into his reference library (text files need nothing)
+game = ["pygame>=2.5"]                                 # build real Python game windows (HTML/JS games need nothing)
 dev = ["pytest>=8"]
 
 [project.scripts]

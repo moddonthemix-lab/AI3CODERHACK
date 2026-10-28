@@ -349,26 +349,32 @@ def test_problem_signature_pulls_out_the_error():
 
 
 def test_every_template_is_a_working_project():
+    import os
     import subprocess
     import sys
     import tempfile
     from pathlib import Path as _P
+    from builder.buildagent import pygame_available
     from builder.templates import TEMPLATES
+    env = {**os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy",
+           "PYGAME_HIDE_SUPPORT_PROMPT": "1"}
     for kind, t in TEMPLATES.items():
+        if kind == "pygame" and not pygame_available():
+            continue                                     # pygame is optional; skip when it isn't installed
         d = _P(tempfile.mkdtemp())
         for name, content in t["files"].items():
             (d / name).write_text(content, encoding="utf-8")
-        r = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=d, capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=d, capture_output=True, text=True, env=env)
         assert r.returncode == 0, f"template {kind} does not pass its own test:\n{r.stdout[-400:]}"
 
 
 def test_drops_files_that_import_missing_libraries():
     from builder.buildagent import _usable_files, make_propose
     files = {"index.html": "<canvas></canvas>", "test_game.py": "def test_x():\n    assert 1",
-             "app.py": "from selenium import webdriver\n", "test_app.py": "import pygame\n"}
+             "app.py": "from selenium import webdriver\n", "test_app.py": "import totally_missing_pkg_xyz\n"}
     kept, dropped = _usable_files(files)
-    assert set(kept) == {"index.html", "test_game.py"}              # selenium/pygame files dropped
-    assert {m for _, m in dropped} == {"selenium", "pygame"}
+    assert set(kept) == {"index.html", "test_game.py"}              # files importing absent libs dropped
+    assert {m for _, m in dropped} == {"selenium", "totally_missing_pkg_xyz"}
     # a local sibling import is NOT dropped
     k2, _ = _usable_files({"app.py": "x=1\n", "test_app.py": "from app import x\n"})
     assert set(k2) == {"app.py", "test_app.py"}
@@ -489,3 +495,33 @@ def test_build_memory_is_recorded_and_recalled(tmp_path):
 def _json_files(files: dict) -> str:
     import json
     return json.dumps(files)
+
+
+def test_pygame_kind_only_when_pygame_is_installed():
+    from builder.buildagent import classify, pygame_available, _wants_pygame
+    # the wording detector is pure (no install needed)
+    assert _wants_pygame(" a pygame space shooter ")
+    assert _wants_pygame(" a python snake game ")
+    assert not _wants_pygame(" a pong game ")           # no python/pygame word -> stays HTML
+    # classify only returns pygame when pygame is actually importable
+    want = "a python pygame space shooter"
+    if pygame_available():
+        assert classify(want) == "pygame"
+    else:
+        assert classify(want) == "game"                 # falls back to the always-works HTML game
+    # plain game requests never become pygame
+    assert classify("a pong game") == "game"
+
+
+def test_pygame_build_uses_the_pygame_contract_and_template():
+    from builder.buildagent import make_propose, pygame_available
+    if not pygame_available():
+        import pytest
+        pytest.skip("pygame not installed in this environment")
+    seen = []
+    propose = make_propose(lambda p: (seen.append(p), "x\nFILES_JSON: {}")[1],
+                           "a pygame space shooter", log=lambda m: None)
+    propose({"attempt": 1, "failure": None, "diff": ""})
+    assert "pygame" in seen[0].lower()
+    assert "game.py" in seen[0]                         # the pygame template is the starting point
+    assert "__main__" in seen[0]                        # window stays under __main__ (headless-safe)

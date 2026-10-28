@@ -49,6 +49,30 @@ NEVER ship stubs or broken tests — this is the most common reason a build fail
   with no ReferenceError when opened."""
 
 
+# A variant contract for pygame games: pygame IS allowed (it's installed), but the window must stay out of
+# import time and out of the tests, so the headless sandbox can still run them.
+PYGAME_FILE_CONTRACT = """
+
+You are writing a small, self-contained PYTHON GAME using pygame. Reply with:
+1. A short plain-language note: what you built and how its test checks it.
+2. On the LAST line, exactly one JSON object mapping each file path to its full contents:
+   FILES_JSON: {"game.py": "....", "test_game.py": "...."}
+
+Rules:
+- Use the Python standard library and PYGAME only. Do NOT import any other third-party package (numpy,
+  pymunk, requests, …) — they are not installed and cannot be installed.
+- Put the real game LOGIC in plain functions (e.g. move(pos, dx, dy), collides(a, b), spawn(...)) so the
+  test can call them directly. Open the window and run the loop ONLY inside main(), guarded by
+  `if __name__ == "__main__":`.
+- Importing game.py must NOT open a window: do NOT call pygame.init(), pygame.display.set_mode(), load
+  images/sounds, or start the loop at module top level. Put `os.environ.setdefault(
+  "PYGAME_HIDE_SUPPORT_PROMPT", "1")` before `import pygame`.
+- The pytest test imports the LOGIC functions and checks them with plain asserts and CONCRETE values. It
+  must NOT open a window, call main(), init the display, or load assets.
+- Fully implement every function — no `pass`, `...`, `TODO` or empty bodies. Give the COMPLETE contents of
+  every file. Use relative paths only."""
+
+
 # Builder works out the right shape of project from a plain request, so the boss doesn't have to spell out
 # "single HTML file, canvas, with a test" every time. Each kind adds concrete, buildable-and-testable specs.
 RECIPES = {
@@ -92,6 +116,13 @@ RECIPES = {
         "- Put the real work in plain functions in a .py, with a tiny argparse CLI under\n"
         "  `if __name__ == '__main__':` (never run work or input() at import time).\n"
         "- Add a pytest test that imports and checks those functions."),
+    "pygame": (
+        "\n\nThis is a PYTHON GAME using pygame (pygame IS installed) — make it actually PLAYABLE:\n"
+        "- game.py: the game. Put the LOGIC in plain functions (move, collides, spawn, step). Open the\n"
+        "  window and run the loop ONLY inside main(), guarded by `if __name__ == \"__main__\":`.\n"
+        "- test_game.py: import those logic functions and assert on them. It must NOT open a window, call\n"
+        "  main(), init the display, or load images/sounds (the sandbox is headless).\n"
+        "- Keep it to game.py + test_game.py."),
 }
 
 _KIND_WORDS = {
@@ -113,9 +144,25 @@ _KIND_WORDS = {
 GAME_STARTER_FILES = template_files("game")
 
 
+def pygame_available() -> bool:
+    """True only when pygame is actually installed, so Builder offers it only when it can really run it."""
+    import importlib.util
+    return importlib.util.find_spec("pygame") is not None
+
+
+def _wants_pygame(t: str) -> bool:
+    """A real Python game: the request says 'pygame', or 'python' together with a game word."""
+    has_game_word = any(w in t for w in _KIND_WORDS["game"])
+    return ("pygame" in t) or ("python" in t and has_game_word)
+
+
 def classify(task: str) -> str:
     """Guess the kind of project from a plain request, so Builder adds the right build recipe himself."""
     t = " " + task.lower() + " "
+    # A Python game with pygame — but only when pygame is installed; otherwise a game stays HTML/JS (which
+    # always runs offline with no install), so builds never depend on a package that isn't there.
+    if _wants_pygame(t) and pygame_available():
+        return "pygame"
     for kind, words in _KIND_WORDS.items():
         if any(w in t for w in words):
             return kind
@@ -328,10 +375,12 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
     """
     note = (f"\n\nWhat you remember (apply it):\n{memory_note}\n" if memory_note else "")
     recipe = recipe_for(task)          # Builder works out the right project shape from the plain request
-    contract = FILE_CONTRACT + recipe
     kind = classify(task)
+    base_contract = PYGAME_FILE_CONTRACT if kind == "pygame" else FILE_CONTRACT
+    contract = base_contract + recipe
     if kind != "default":
-        log(f"  (building this as a {kind} — making it {'playable' if kind == 'game' else 'runnable'} and tested)")
+        log(f"  (building this as a {kind} — making it "
+            f"{'playable' if kind in ('game', 'pygame') else 'runnable'} and tested)")
     # Every build starts from a WORKING template (a past solution if there's a close one, else the built-in
     # template for this kind). It's kept as the guaranteed baseline, so a build can't come out empty/broken.
     if starter and starter.get("files"):
@@ -341,6 +390,8 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
         # so "a pong game" adapts real Pong instead of the snake-ish default.
         gkind = game_template_for(task)
         baseline_files, baseline_task = template_files(gkind), f"a working {gkind} game"
+    elif kind == "pygame":
+        baseline_files, baseline_task = template_files("pygame"), "a working pygame game"
     else:
         baseline_files, baseline_task = template_files(kind), f"a working {kind} starter"
     files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in baseline_files.items())

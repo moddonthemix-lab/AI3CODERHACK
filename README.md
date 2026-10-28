@@ -101,6 +101,13 @@ He writes the project, runs its tests, fixes failures, and shows you the diff. W
 playable version of that game and adapts it — so "a pong game" comes out as actual Pong, not a mash-up.
 The more specific your request ("two paddles, ball speeds up, first to 5"), the closer it lands.
 
+**Real Python games with pygame (optional).** By default games are a single HTML/JS file (runs anywhere,
+no install). If you install pygame (`pip install 'builder[game]'`) and ask for a *"pygame"* game or a
+*"python game"*, he builds a real pygame window instead — `game.py` with the logic in testable functions
+plus a test that runs headless. Run it with `python game.py` (pygame games open a window, so they're not
+browser-previewable). Without pygame installed, a game request always stays HTML/JS, so builds never depend
+on a package that isn't there.
+
 **Modify something he already built.** Point `build` at a folder that already has a project and he
 *edits what's there* instead of starting over:
 
@@ -171,7 +178,7 @@ Every endpoint stays inside the scope and the gates above.
 
 | Command | What it does |
 |---|---|
-| `builder new <kind> --dir <folder>` | Scaffold a working project instantly from a template (game, web, api, cli, python) — no model, never fails |
+| `builder new <kind> --dir <folder>` | Scaffold a working project instantly from a template (game, pong, snake, breakout, pygame, web, api, cli, python) — no model, never fails |
 | `builder templates` | List the ready-made templates (built-in + your saved ones) |
 | `builder save-template <name> --dir <folder>` | Save a folder you built as your own reusable template |
 | `builder build "<task>" --dir <folder>` | Write a project, run its tests, fix failures, show the diff (`--undo` to restore) |

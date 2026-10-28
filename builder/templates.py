@@ -278,6 +278,97 @@ _BREAKOUT_TEST = """def test_breakout_has_the_essentials():
     assert 'Score' in html or 'score' in html
 """
 
+# ---------------------------------------------------------------- pygame (real Python game window)
+# Only used when pygame is installed. The game logic lives in plain functions so the test can check them
+# WITHOUT opening a window (the sandbox is headless); the window + loop live under __main__.
+_PYGAME_GAME = '''"""A small pygame game. Run it with:  python game.py  (arrow keys to move, collect the red dots).
+
+The game LOGIC is in plain functions (move, clamp, collides) so it can be tested without a window.
+Only main() opens a window, so importing this file — and the tests — never need a display.
+"""
+import os
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+import random
+
+import pygame
+
+WIDTH, HEIGHT, SIZE = 480, 360, 20
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def move(pos, dx, dy, speed=5):
+    """Return a new (x, y) moved by direction (dx, dy), clamped so the player stays on screen."""
+    x = clamp(pos[0] + dx * speed, 0, WIDTH - SIZE)
+    y = clamp(pos[1] + dy * speed, 0, HEIGHT - SIZE)
+    return (x, y)
+
+
+def collides(a, b, size=SIZE):
+    """True if two size-by-size squares at positions a and b overlap."""
+    return abs(a[0] - b[0]) < size and abs(a[1] - b[1]) < size
+
+
+def random_pos(rng=random):
+    return (rng.randint(0, WIDTH - SIZE), rng.randint(0, HEIGHT - SIZE))
+
+
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Collect the dots")
+    clock = pygame.time.Clock()
+    font = pygame.font.SysFont(None, 28)
+    player, target, score = (WIDTH // 2, HEIGHT // 2), random_pos(), 0
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+        keys = pygame.key.get_pressed()
+        dx = (1 if keys[pygame.K_RIGHT] else 0) - (1 if keys[pygame.K_LEFT] else 0)
+        dy = (1 if keys[pygame.K_DOWN] else 0) - (1 if keys[pygame.K_UP] else 0)
+        player = move(player, dx, dy)
+        if collides(player, target):
+            score += 1
+            target = random_pos()
+        screen.fill((17, 17, 17))
+        pygame.draw.rect(screen, (77, 163, 255), (*player, SIZE, SIZE))
+        pygame.draw.rect(screen, (255, 80, 80), (*target, SIZE, SIZE))
+        screen.blit(font.render(f"Score: {score}", True, (255, 255, 255)), (10, 10))
+        pygame.display.flip()
+        clock.tick(60)
+    pygame.quit()
+
+
+if __name__ == "__main__":
+    main()
+'''
+_PYGAME_TEST = '''import os
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+
+from game import HEIGHT, SIZE, WIDTH, clamp, collides, move
+
+
+def test_clamp():
+    assert clamp(5, 0, 10) == 5
+    assert clamp(-3, 0, 10) == 0
+    assert clamp(99, 0, 10) == 10
+
+
+def test_move_stays_on_screen():
+    assert move((0, 0), -1, -1) == (0, 0)                  # can't leave the top-left
+    assert move((WIDTH, HEIGHT), 1, 1) == (WIDTH - SIZE, HEIGHT - SIZE)   # clamped to bottom-right
+    assert move((100, 100), 1, 0) == (105, 100)            # moves right by the default speed
+
+
+def test_collides():
+    assert collides((100, 100), (105, 105)) is True
+    assert collides((0, 0), (300, 300)) is False
+'''
+
 # ---------------------------------------------------------------- website (landing page)
 _SITE_HTML = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -412,6 +503,8 @@ TEMPLATES = {
              "files": {"index.html": _PONG_HTML, "test_pong.py": _PONG_TEST}},
     "breakout": {"desc": "Breakout — paddle, ball and bricks to clear (index.html) + a test",
                  "files": {"index.html": _BREAKOUT_HTML, "test_breakout.py": _BREAKOUT_TEST}},
+    "pygame": {"desc": "A real Python game window with pygame (game.py) + a test — run: python game.py",
+               "files": {"game.py": _PYGAME_GAME, "test_game.py": _PYGAME_TEST}},
     "web": {"desc": "A responsive one-page website (index.html) + a test",
             "files": {"index.html": _SITE_HTML, "test_site.py": _SITE_TEST}},
     "api": {"desc": "A JSON API using the standard library (app.py) + tests",
