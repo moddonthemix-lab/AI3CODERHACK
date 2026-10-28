@@ -322,11 +322,8 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                 blm = assistant.llm
                 if not blm.available():
                     return self._send(503, {"error": "local coder model not reachable (is Ollama running?)"})
-                fallback = None
-                if getattr(cfg, "fallback_model", "") and cfg.fallback_model != blm.model:
-                    from .llm import Ollama
-                    fallback = Ollama(cfg.ollama_url, cfg.fallback_model, cfg.llm_timeout, cfg.num_ctx,
-                                      one_at_a_time=cfg.one_model_at_a_time)
+                from .llm import stronger_model
+                fallback = stronger_model(cfg, blm.model)   # cloud brain when configured, else the local 7b
                 try:
                     with brain:
                         result = run_build(body["task"], proj, blm, memory=memory,

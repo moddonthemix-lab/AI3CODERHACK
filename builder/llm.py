@@ -192,6 +192,88 @@ class Ollama:
             return False
 
 
+class CloudBrain:
+    """Optional 'stronger brain' — the family cloud model (Claude via the ``anthropic`` SDK).
+
+    PLACEHOLDER / OFF by default. It only does anything when BOTH a model and an API key are configured
+    (``BUILDER_CLOUD_MODEL`` + a key). It presents the same ``model`` / ``available()`` / ``chat()``
+    interface as :class:`Ollama`, so it drops straight in as Builder's stronger model for the thinking
+    steps (plan, self-review, escalation) — and whatever it works out is distilled into local memory, so
+    the offline model learns from it. Nothing here reaches the network until it's configured and used.
+    """
+
+    def __init__(self, model: str, api_key: str, base_url: str = "", timeout: float = 120,
+                 max_output: int = 4000):
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+        self.timeout = timeout
+        self.max_output = max_output
+        self.last: dict = {}
+        self.totals = {"calls": 0, "prompt_tokens": 0, "output_tokens": 0, "seconds": 0.0}
+
+    def available(self) -> bool:
+        """True only when it's actually usable: a model, a key, and the optional ``anthropic`` SDK present."""
+        if not (self.model and self.api_key):
+            return False
+        try:
+            import anthropic  # noqa: F401 — optional extra: pip install 'builder[cloud]'
+        except ImportError:
+            return False
+        return True
+
+    def chat(self, messages: list[dict], tools=None, json_mode: bool = False, schema=None,
+             think: bool | None = None, max_tokens: int | None = None) -> dict:
+        """Answer like Ollama.chat: returns {"role": "assistant", "content": "..."}. Raises LLMError on failure."""
+        try:
+            from anthropic import Anthropic
+        except ImportError as e:
+            raise LLMError("the cloud brain needs the anthropic SDK: pip install 'builder[cloud]'") from e
+        system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
+        convo = [{"role": m["role"], "content": m["content"]}
+                 for m in messages if m.get("role") in ("user", "assistant")]
+        if not convo:
+            convo = [{"role": "user", "content": system}]
+            system = ""
+        kwargs = {"model": self.model, "max_tokens": max_tokens or self.max_output, "messages": convo}
+        if system:
+            kwargs["system"] = system
+        start = time.monotonic()
+        try:
+            client = Anthropic(api_key=self.api_key, timeout=self.timeout,
+                               **({"base_url": self.base_url} if self.base_url else {}))
+            resp = client.messages.create(**kwargs)
+            text = "".join(getattr(b, "text", "") for b in resp.content)
+        except Exception as e:  # noqa: BLE001 — any SDK/network error becomes a clean LLMError
+            raise LLMError(f"cloud brain error: {e}") from e
+        self.totals["calls"] += 1
+        self.totals["seconds"] += time.monotonic() - start
+        return {"role": "assistant", "content": text}
+
+
+def build_cloud_brain(config):
+    """Construct the cloud brain from config, or None when cloud isn't configured (the default)."""
+    model = getattr(config, "cloud_model", "") or ""
+    key = getattr(config, "cloud_api_key", "") or ""
+    if not model or not key:
+        return None
+    return CloudBrain(model, key, getattr(config, "cloud_base_url", ""),
+                      getattr(config, "llm_timeout", 120))
+
+
+def stronger_model(config, base_model: str):
+    """Builder's stronger 'brain' for the thinking steps: the cloud brain when it's configured AND usable,
+    otherwise the local stronger model (the 7b). Returns None when neither is available."""
+    cloud = build_cloud_brain(config)
+    if cloud is not None and cloud.available():
+        return cloud
+    fm = getattr(config, "fallback_model", "")
+    if fm and fm != base_model:
+        return Ollama(config.ollama_url, fm, config.llm_timeout, config.num_ctx,
+                      one_at_a_time=config.one_model_at_a_time)
+    return None
+
+
 def parse_json(text: str) -> dict:
     """Best-effort JSON from a model reply (tolerates code fences, chatter and stray think tags)."""
     text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()

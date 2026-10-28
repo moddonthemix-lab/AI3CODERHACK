@@ -222,11 +222,9 @@ def _cmd_build(args, config, llm, memory=None) -> int:
         err("✗ The local coder model isn't reachable. Is Ollama running? (try: builder bench)")
         return 1
 
-    # A stronger model to fall back to if the fast one can't finish the build.
-    fallback_llm = None
-    if config.fallback_model and config.fallback_model != config.model:
-        fallback_llm = Ollama(config.ollama_url, config.fallback_model, config.llm_timeout, config.num_ctx,
-                              one_at_a_time=config.one_model_at_a_time)
+    # The stronger brain for planning/self-review/escalation: the cloud brain when configured, else the 7b.
+    from .llm import stronger_model
+    fallback_llm = stronger_model(config, config.model)
 
     test_cmd = args.test.split() if args.test else None
     result = run_build(task, proj, llm, memory=memory, test_cmd=test_cmd, tries=args.tries, log=err,
@@ -375,6 +373,14 @@ def _cmd_doctor(config, llm) -> int:
         have = any(name == m for name in installed)
         line(have, f"{role} model {m}",
              "installed" if have else (f"not pulled — run: ollama pull {m}" if reachable else "can't check (Ollama down)"))
+    # Cloud brain is optional and OFF by default — just report its status, never fail doctor over it.
+    from .llm import build_cloud_brain
+    cloud = build_cloud_brain(config)
+    if cloud is None:
+        print(f"  • cloud brain: off (fully local). Set BUILDER_CLOUD_MODEL + a key to enable it later.")
+    else:
+        print(f"  {'✓' if cloud.available() else '•'} cloud brain: {config.cloud_model} "
+              + ("ready" if cloud.available() else "configured, but needs: pip install 'builder[cloud]'"))
     try:
         import tempfile
         r = sandbox.run_python("print('sandbox-ok')", Path(tempfile.mkdtemp()))

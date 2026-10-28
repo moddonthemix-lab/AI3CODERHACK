@@ -148,6 +148,15 @@ Findings are saved into his memory, so he remembers them next time (and offline)
 
 ---
 
+## The cloud brain (optional, off by default)
+
+Builder is **fully local**. There's an optional seam for a stronger "cloud brain" (Claude) that is **off
+unless you configure it** — set `BUILDER_CLOUD_MODEL` and a key in `.env` and `pip install 'builder[cloud]'`.
+When on, it becomes his stronger brain for the thinking steps (planning, self-review, escalation), and
+**whatever it works out is distilled into his local memory**, so the offline/smaller model gets sharper
+from it over time. `builder doctor` shows whether it's off (the default) or ready. Nothing reaches the
+network until you turn it on.
+
 ## Offline & memory
 
 Everything runs on the local model, so **build, review, doctor and memory all work with no internet.**

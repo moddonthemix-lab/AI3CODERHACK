@@ -104,6 +104,12 @@ class Config:
     fast_model: str = field(default_factory=_p("fast_model", "FAST_MODEL"))
     # When a build fails on the main model, retry once on this stronger one (slower but sharper). Empty = off.
     fallback_model: str = field(default_factory=lambda: _env("FALLBACK_MODEL", "qwen2.5-coder:7b"))
+    # Optional cloud brain (the stronger model). OFF by default: set BOTH a model and a key to turn it on.
+    # When set, it becomes Builder's stronger brain for planning/self-review/escalation, and what it works
+    # out is distilled into local memory so the offline model learns from it. (Needs: pip install 'builder[cloud]'.)
+    cloud_model: str = field(default_factory=lambda: _env("CLOUD_MODEL", ""))
+    cloud_api_key: str = field(default_factory=lambda: _env("CLOUD_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", ""))
+    cloud_base_url: str = field(default_factory=lambda: _env("CLOUD_BASE_URL"))
     num_ctx: int = field(default_factory=_p_int("num_ctx", "NUM_CTX"))
     read_chars: int = field(default_factory=_p_int("read_chars", "READ_CHARS"))
     # Let the thinker reason step by step before answering — slower on a CPU, more accurate on judgement calls.
