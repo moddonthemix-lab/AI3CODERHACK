@@ -52,6 +52,30 @@ TOOLS: dict[str, str] = {
     "ncat": "banner grab / connect",
     "ping": "check the host is up",
     "traceroute": "trace the network path",
+    # extended recon / web / AD enumeration
+    "dirsearch": "brute-force web paths",
+    "sslscan": "check TLS/SSL config & ciphers",
+    "testssl": "deep TLS/SSL testing",
+    "dnsenum": "DNS enumeration",
+    "dnsrecon": "DNS reconnaissance",
+    "fierce": "DNS recon",
+    "sublist3r": "subdomain enumeration",
+    "amass": "subdomain / attack-surface enumeration",
+    "httpx": "probe web servers",
+    "nuclei": "template-based vulnerability scan",
+    "onesixtyone": "SNMP community scan",
+    "snmp-check": "SNMP enumeration",
+    "showmount": "list NFS exports",
+    "rpcclient": "query MS-RPC (SMB/AD)",
+    "ldapsearch": "query LDAP / Active Directory",
+    "kerbrute": "enumerate/validate Kerberos users",
+    "enum4linux-ng": "improved SMB / Windows enumeration",
+    "cewl": "build a wordlist from a target site",
+    "ssh": "connect to SSH on the target",
+    "ftp": "connect to FTP on the target",
+    "telnet": "connect to a service on the target",
+    "mysql": "connect to MySQL on the target",
+    "psql": "connect to PostgreSQL on the target",
 }
 
 # Exploitation tools that AIM AT the target (same gating as recon: target is appended, nothing else).
@@ -63,8 +87,26 @@ EXPLOIT_TOOLS: dict[str, str] = {
     "wfuzz": "fuzz web requests on the target",
     "patator": "multi-protocol brute-force on the target",
     "crackmapexec": "enumerate/authenticate against the target (SMB/WinRM/…)",
+    # Windows / Active Directory
+    "netexec": "enumerate/authenticate across SMB/WinRM/LDAP (nxc)",
+    "nxc": "netexec (SMB/WinRM/LDAP)",
+    "evil-winrm": "interactive WinRM shell on the target",
+    "impacket-secretsdump": "dump secrets/hashes from the target",
+    "impacket-GetNPUsers": "AS-REP roasting (Kerberos)",
+    "impacket-GetUserSPNs": "Kerberoasting (Kerberos)",
+    "impacket-psexec": "command execution on the target (SMB)",
+    "impacket-wmiexec": "command execution on the target (WMI)",
+    "impacket-smbexec": "command execution on the target (SMB)",
+    "impacket-mssqlclient": "connect to MSSQL on the target",
+    "bloodhound-python": "collect AD data for BloodHound",
 }
 TOOLS.update(EXPLOIT_TOOLS)
+
+# Tools that give you a LIVE session — run them attached to your terminal (no capture), not as a one-shot.
+INTERACTIVE: set[str] = {
+    "evil-winrm", "impacket-psexec", "impacket-wmiexec", "impacket-smbexec", "impacket-mssqlclient",
+    "ssh", "ftp", "telnet", "mysql", "psql", "smbclient",
+}
 
 # LOCAL tools — no remote target (they search/generate/crack locally). Still lab-gated, approved and logged.
 LOCAL_TOOLS: dict[str, str] = {
@@ -74,6 +116,11 @@ LOCAL_TOOLS: dict[str, str] = {
     "hashcat": "crack password hashes you captured (local)",
     "hashid": "identify a hash type",
     "hash-identifier": "identify a hash type",
+    "pypykatz": "parse LSASS / mimikatz dumps locally",
+    "gpp-decrypt": "decrypt a Group Policy Preferences password",
+    "stegseek": "crack/extract steghide-hidden data from a file",
+    "exiftool": "read a file's metadata",
+    "binwalk": "find/extract embedded data in a file",
 }
 
 # Standard reverse-shell one-liners (as published in PayloadsAllTheThings / pentestmonkey). Pure text —
@@ -148,20 +195,30 @@ def run_tool(cfg, db, tool: str, target: str, args: list[str] | None = None, app
     if not tool_available(tool):
         raise LabToolError(f"'{tool}' isn't installed. Install it first (e.g. on a Mac: brew install {tool}), "
                            f"then try again.")
-    # The authorized target is always the final argument, so the tool is aimed at it and nothing else.
-    cmd = [tool, *args, target]
+    # The authorized target must be in the command. If the user already put it in an argument (e.g. an
+    # impacket 'domain/user:pass@target' string, or 'evil-winrm -i target'), use that; otherwise append it.
+    # Either way the arg-safety check above has already refused any OTHER host, so it's aimed only here.
+    cmd = [tool, *args] if any(target in str(a) for a in args) else [tool, *args, target]
     safety.guard_action("offense", detail=f"{tool} {' '.join(args)}".strip(), target=target)  # 5. approval + log
     log(f"  running: {' '.join(cmd)}")
     start = time.monotonic()
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        output = (p.stdout or "")
-        if p.stderr:
-            output += ("\n[stderr]\n" + p.stderr)
-    except subprocess.TimeoutExpired:
-        output = f"(no result — {tool} ran longer than {timeout}s and was stopped)"
-    except OSError as e:
-        output = f"(couldn't run {tool}: {e})"
+    if tool in INTERACTIVE:
+        # A live session (a shell, a DB/SMB client) — attach it to your terminal; don't capture.
+        try:
+            subprocess.run(cmd)
+        except (OSError, KeyboardInterrupt):
+            pass
+        output = "(interactive session ended)"
+    else:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            output = (p.stdout or "")
+            if p.stderr:
+                output += ("\n[stderr]\n" + p.stderr)
+        except subprocess.TimeoutExpired:
+            output = f"(no result — {tool} ran longer than {timeout}s and was stopped)"
+        except OSError as e:
+            output = f"(couldn't run {tool}: {e})"
     db.log_safety("offense", "allowed", detail=f"{tool} {' '.join(args)}".strip(), target=target,
                   reason="authorized-lab recon/enum")
     return {"tool": tool, "target": target, "cmd": cmd, "output": output,
