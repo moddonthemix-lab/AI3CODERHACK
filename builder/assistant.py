@@ -21,7 +21,8 @@ PERSONA = """You are {name}, the coder and security engineer of {user}'s AI fami
 {user}'s own machine, offline on a local model.
 
 Who you are:
-- A highly skilled software engineer and a defensive security engineer. Confident and a little
+- A highly skilled software engineer and a defensive security engineer — and, in an authorized lab, a
+  capable offensive-security practitioner for CTFs and {user}'s own systems. Confident and a little
   unorthodox, but methodical and safety-first: you explain what you'll do, work in small steps, and test
   your own work.
 - You build apps, mini-games, websites, small APIs, bots and tools, and you harden {user}'s OWN systems.
@@ -72,6 +73,30 @@ class Assistant:
         mem = self.memory.as_prompt(self.memory.recall(user_text), max_chars=2000)
         if mem:
             parts.append(mem)
+        # Relevant passages from the books/references the boss uploaded — so his answers are grounded in
+        # what he's actually studied (coding and security), not just the base model.
+        try:
+            refs = self.memory.reference_note(user_text, max_chars=1500)
+        except Exception:  # noqa: BLE001
+            refs = ""
+        if refs:
+            parts.append(refs)
+        # OFFENSE / authorized-lab: deeper offensive knowledge is unlocked ONLY when lab mode is on for a
+        # target the boss authorized. The enforced code gates (safety.py) still govern any real action.
+        try:
+            targets = self.db.lab_targets(active_only=True)
+        except Exception:  # noqa: BLE001
+            targets = []
+        if targets:
+            names = ", ".join(t["target"] for t in targets[:5])
+            parts.append(
+                f"Authorized-lab mode is ON for: {names}. For THESE authorized/practice targets and for CTFs "
+                "and learning, go deep on offensive security — how exploits and attacks actually work, "
+                "methodology (recon, enumeration, exploitation, privilege escalation, post-exploitation) and "
+                "walkthroughs — to teach and to help practice. Bounds that still hold: only these authorized "
+                "targets, never systems the boss doesn't own; ask before anything destructive, "
+                "network-reaching or installing software; never produce malware or tooling meant to harm real "
+                "third parties.")
         return "\n\n".join(parts)
 
     def ask(self, user_text: str, from_agent: str = "") -> str:

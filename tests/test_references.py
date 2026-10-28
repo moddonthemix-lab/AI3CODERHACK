@@ -131,3 +131,32 @@ def test_build_with_a_stronger_model_distils_an_insight(tmp_path):
     run_build("a taco truck landing page", proj, Model("fast"), memory=mem, tries=1,
               log=lambda m: None, fallback_llm=Model("strong"))
     assert any(d["source"] == "learned-insights" for d in mem.documents())   # it learned from the strong model
+
+
+def test_assistant_uses_references_and_gates_offense_by_lab_mode(tmp_path):
+    from builder.assistant import Assistant
+    from builder.config import Config
+    from builder.db import Store
+    from builder.memory import Memory
+
+    class FakeLLM:
+        model = "x"
+        def available(self): return True
+        def chat(self, *a, **k): return {"content": "ok"}
+
+    cfg = Config(home=tmp_path)
+    store = Store(":memory:")
+    mem = Memory(store, None, cfg)
+    mem.learn_insight("sql injection", "Use parameterised queries; never build SQL from input.", source="book")
+    a = Assistant(FakeLLM(), cfg, mem, store)
+
+    # references feed the chat; offense note is OFF by default
+    sp = a.system_prompt("how do I prevent sql injection?")
+    assert "parameterised queries" in sp
+    assert "Authorized-lab mode is ON" not in sp
+
+    # turning on lab mode unlocks the (bounded) offensive-teaching note
+    store.authorize_lab_target("my-practice-vm", "vm", "owned")
+    sp2 = a.system_prompt("walk me through exploiting this")
+    assert "Authorized-lab mode is ON" in sp2
+    assert "never systems the boss doesn't own" in sp2
