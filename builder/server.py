@@ -333,7 +333,8 @@ def make_handler(store: Store, assistant: Assistant | None, token: str = "",
                 except LLMError as e:
                     return self._send(502, {"error": str(e)})
                 return self._send(200, {"from": CARD["id"], "ok": result["ok"], "attempts": result["attempts"],
-                                        "diff": result["diff"], "dir": str(proj.root)})
+                                        "diff": result["diff"], "dir": str(proj.root),
+                                        "no_change": bool(result.get("no_change"))})
             with lock:
                 if path == "/api/inbox/read":
                     return self._send(200, {"marked": store.mark_read(body.get("id"))})

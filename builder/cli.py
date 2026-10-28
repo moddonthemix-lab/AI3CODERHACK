@@ -226,6 +226,11 @@ def _cmd_build(args, config, llm, memory=None) -> int:
                        fallback_llm=fallback_llm)
     save_backup(proj, backup_path)
 
+    if result.get("no_change"):
+        err("\n⚠ Couldn't apply that change — your project was left untouched.")
+        err("  Try rephrasing it more concretely (name the file/colour/number to change),")
+        err("  e.g.  \"make the paddles blue and the ball yellow\"  or  \"make the ball 50% faster\".")
+        return 1
     print(result["diff"] or "(no changes written)")
     t = result["test"] or {}
     err(f"\n{'✓ tests pass' if result['ok'] else '✗ tests still failing'} "

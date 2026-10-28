@@ -258,10 +258,14 @@ def test_build_in_an_existing_folder_adapts_what_is_there(tmp_path):
             seen.append(msgs[-1]["content"])
             return {"content": "ok\nFILES_JSON: {}"}       # model changes nothing; template fallback keeps it runnable
 
-    run_build("make the ball faster", proj, LLM(), tries=1, log=lambda m: None)
+    result = run_build("make the ball faster", proj, LLM(), tries=1, log=lambda m: None)
     assert seen, "the model should have been asked"
     assert "MY OWN PONG" in seen[0]                         # his current file was handed back to adapt
-    assert "modify it" in seen[0]
+    assert "EXISTING project files" in seen[0]              # he's told to edit what's there, not start over
+    # the model here changed nothing, so he must report that honestly, not fake a pass
+    assert result.get("no_change") is True
+    assert result["ok"] is False
+    assert "MY OWN PONG" in (tmp_path / "index.html").read_text()   # project left untouched, not clobbered
 
 
 def test_game_build_ignores_a_poisoned_recalled_solution(tmp_path):

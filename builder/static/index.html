@@ -181,6 +181,12 @@ async function build() {
   try {
     const r = await api("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task, dir }) });
     if (r.error) { $("bout").textContent = "✗ " + r.error; }
+    else if (r.no_change) {
+      $("bout").innerHTML = "⚠ He couldn't apply that change, so your project was left untouched.<br>" +
+        "Try rephrasing it more concretely — name the thing to change, e.g. " +
+        "<em>\"make the paddles blue and the ball yellow\"</em> or <em>\"make the ball 50% faster\"</em>.";
+      refresh();
+    }
     else {
       const prev = `  <a href="/preview?path=${encodeURIComponent(r.dir)}&_=${Date.now()}" target="_blank" style="color:var(--accent)">Open preview ↗</a>`;
       $("bout").innerHTML = esc((r.ok ? "✓ tests pass" : "✗ tests still failing") + " after " + r.attempts +

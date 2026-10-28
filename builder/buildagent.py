@@ -191,14 +191,16 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     # If the folder ALREADY has a project in it, Builder MODIFIES it: its current files become the starting
     # point, so "make the ball faster" / "add a second paddle" adapts the real code instead of starting over.
     kind = classify(task)
+    is_modify = False
     starter = None
     try:
         existing = project.existing_files()
     except Exception:  # noqa: BLE001
         existing = {}
     if existing:
-        log("  (this folder already has a project — adapting what's there instead of starting fresh)")
-        starter = {"task": f"the existing project in this folder (modify it): {task}", "files": existing}
+        is_modify = True
+        log("  (this folder already has a project — changing what's there instead of starting fresh)")
+        starter = {"task": f"the existing project in this folder: {task}", "files": existing}
     elif memory is not None and kind != "game":
         # For a GAME the specific built-in template (pong/snake/breakout) is the authoritative starting
         # point, so we DON'T pull a remembered past build in — that's what used to drag every "pong" back
@@ -208,24 +210,43 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
         except Exception:  # noqa: BLE001
             starter = None
 
-    propose = make_propose(_generator(llm), task, log=log, memory_note=note, starter=starter)
+    def changed_nothing() -> bool:
+        return not (project.diff() or "").strip()
+
+    propose = make_propose(_generator(llm), task, log=log, memory_note=note, starter=starter, is_modify=is_modify)
     result = build_and_test(project, propose, test_cmd=test_cmd, max_tries=tries, log=log)
 
-    if not result["ok"] and fallback_llm is not None:
+    # In MODIFY mode, "tests pass but nothing actually changed" is NOT success — the weak model often just
+    # echoes the file back or only talks. Treat that like a failure so we escalate to the stronger model.
+    no_change = is_modify and changed_nothing()
+    if (not result["ok"] or no_change) and fallback_llm is not None:
         try:
             available = fallback_llm.available()
         except Exception:  # noqa: BLE001
             available = False
         if available:
-            log("  the fast model couldn't finish it — retrying with the stronger model (slower)…")
+            log("  the fast model didn't apply the change — retrying with the stronger model (slower)…"
+                if no_change else
+                "  the fast model couldn't finish it — retrying with the stronger model (slower)…")
             current = {name: project.read(name) for name in project.changed()}
+            files2 = current or (starter or {}).get("files", {})
+            starter2 = {"task": (starter or {}).get("task", task), "files": files2} if files2 else starter
             propose2 = make_propose(_generator(fallback_llm), task, log=log, memory_note=note,
-                                    starter={"task": task, "files": current} if current else starter)
+                                    starter=starter2, is_modify=is_modify)
             result = build_and_test(project, propose2, test_cmd=test_cmd, max_tries=tries, log=log)
+            no_change = is_modify and changed_nothing()
 
-    # Last-resort guarantee: if neither model could pass, drop in the clean working template for this kind
-    # (or the reused past solution) and ship that — so a build ALWAYS leaves a runnable result.
-    if not result["ok"]:
+    if is_modify:
+        # NEVER drop a template over the boss's existing project. If the model still changed nothing, say so
+        # honestly instead of reporting a success with "(no changes)".
+        if no_change:
+            log("  couldn't get either model to apply that change — leaving your project untouched. "
+                "Try rephrasing it more concretely (e.g. name the file/colour/number to change).")
+            result = {"ok": False, "attempts": result.get("attempts", tries), "test": result.get("test"),
+                      "diff": "", "failures": result.get("failures", []), "no_change": True}
+    elif not result["ok"]:
+        # Fresh build last-resort: drop in the clean working template for this kind (or the reused past
+        # solution) so a build ALWAYS leaves a runnable result.
         from . import sandbox
         if starter and starter.get("files"):
             baseline = starter["files"]
@@ -274,14 +295,17 @@ def files_from_reply(text: str) -> tuple[str, dict[str, str]]:
     return summary, files
 
 
-def make_propose(generate, task: str, log=print, memory_note: str = "", starter: dict | None = None):
+def make_propose(generate, task: str, log=print, memory_note: str = "", starter: dict | None = None,
+                 is_modify: bool = False):
     """Build a ``propose(ctx)`` for ``build_and_test`` from a ``generate(prompt) -> text`` function.
 
     ``generate`` is anything that answers a prompt (the local Ollama coder model, or the family brain).
     The first call writes the project; later calls carry the failing test output so the model can fix it.
     ``memory_note`` (what Builder remembers — the boss's stack, past fixes, lessons) is included so his
     work benefits from memory even offline. ``starter`` is the working files from a similar past build, so
-    he ADAPTS proven code instead of starting from scratch — faster and more reliable.
+    he ADAPTS proven code instead of starting from scratch — faster and more reliable. ``is_modify`` means
+    the ``starter`` files are the boss's EXISTING project and the task is a change to make to them, so the
+    prompt tells the model to edit those files and return them changed (never unchanged).
     """
     note = (f"\n\nWhat you remember (apply it):\n{memory_note}\n" if memory_note else "")
     recipe = recipe_for(task)          # Builder works out the right project shape from the plain request
@@ -301,9 +325,17 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
     else:
         baseline_files, baseline_task = template_files(kind), f"a working {kind} starter"
     files_txt = "".join(f"\n=== {n} ===\n{c}\n" for n, c in baseline_files.items())
-    starter_block = (f"\n\nHere is a WORKING starting point ({baseline_task!r}) that already runs and passes "
-                     f"its test — ADAPT it to the task, keeping what works (don't start from scratch):\n{files_txt[:8000]}")
-    log(f"  (starting from {baseline_task or 'a working template'} and adapting it)")
+    if is_modify:
+        starter_block = (
+            f"\n\nThese are the EXISTING project files. Your job is to CHANGE them to do this: {task!r}.\n"
+            f"Return the COMPLETE updated files with the change actually applied — edit the real code "
+            f"(paddle colours, speeds, levels, text, whatever the change needs). Do NOT return them "
+            f"unchanged, and do NOT just describe the change — make it in the code:\n{files_txt[:8000]}")
+    else:
+        starter_block = (f"\n\nHere is a WORKING starting point ({baseline_task!r}) that already runs and passes "
+                         f"its test — ADAPT it to the task, keeping what works (don't start from scratch):\n{files_txt[:8000]}")
+    log("  (changing your existing project: " + ", ".join(list(baseline_files)[:4]) + ")" if is_modify
+        else f"  (starting from {baseline_task or 'a working template'} and adapting it)")
 
     def propose(ctx: dict) -> dict[str, str]:
         if ctx.get("failure"):
@@ -315,7 +347,8 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
             log(f"  asking the coder model to fix attempt {ctx['attempt'] - 1}'s failures…")
         else:
             prompt = f"Task: {task}{note}{starter_block}" + contract
-            log("  asking the coder model to write the project…")
+            log("  asking the coder model to make the change…" if is_modify
+                else "  asking the coder model to write the project…")
         summary, files = files_from_reply(generate(prompt))
         if summary:
             log(f"  model: {summary.splitlines()[0][:100]}")
@@ -327,7 +360,10 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
         # If nothing usable is left on the first draft, write the working template (run_build's last-resort
         # also drops in the full template if the model's version never passes).
         if not files and not ctx.get("failure"):
-            log("  (model gave nothing usable — using the working template so you still get a result)")
+            if is_modify:
+                log("  (model returned no file changes this attempt)")
+            else:
+                log("  (model gave nothing usable — using the working template so you still get a result)")
             return dict(baseline_files)
         return files
     return propose
