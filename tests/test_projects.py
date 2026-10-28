@@ -525,3 +525,22 @@ def test_pygame_build_uses_the_pygame_contract_and_template():
     assert "pygame" in seen[0].lower()
     assert "game.py" in seen[0]                         # the pygame template is the starting point
     assert "__main__" in seen[0]                        # window stays under __main__ (headless-safe)
+
+
+def test_fresh_build_that_only_returns_the_template_is_flagged_honestly(tmp_path):
+    # A web build where the model produces nothing custom must NOT be reported as a real success —
+    # it falls back to the starter and is flagged used_template so the UI can say so.
+    from builder.buildagent import run_build
+
+    class Cfg:
+        code_dirs = [str(tmp_path)]
+
+    proj = Project(tmp_path / "chef-site", Cfg())
+
+    class UselessLLM:            # always returns nothing usable -> propose writes the template
+        def available(self): return True
+        def chat(self, msgs): return {"content": "sure!\nFILES_JSON: {}"}
+
+    result = run_build("a one page chef landing page", proj, UselessLLM(), tries=1, log=lambda m: None)
+    assert result["ok"] is True                  # the template is valid, so it runs
+    assert result.get("used_template") is True   # but we're honest: it's just the starter

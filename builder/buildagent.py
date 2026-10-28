@@ -88,9 +88,13 @@ RECIPES = {
         "  `def test_...()` functions with no parameters. Do NOT import the HTML, run the game, or write a\n"
         "  separate logic.py — the single playable index.html plus this structural test is all you need."),
     "web": (
-        "\n\nThis is a WEBSITE/PAGE — make it viewable:\n"
+        "\n\nThis is a WEBSITE/PAGE — make it viewable AND specific to the request:\n"
         "- index.html: ONE self-contained file with inline CSS (and JS if needed). It must look right when\n"
         "  opened directly in a browser.\n"
+        "- REPLACE every placeholder with real content for THIS request. Change the <title>, the headline,\n"
+        "  the tagline, the sections and the button text to fit the subject (e.g. for a chef: the chef's\n"
+        "  name, a food hero line, sections like Menu/Specialties, About, Reservations/Contact). Pick colours\n"
+        "  that suit it. Do NOT leave the sample 'My Site' text or the generic Fast/Responsive/Yours cards.\n"
         "- If there's any logic/data, put it in a small .py with a pytest test (test_*.py)."),
     "api": (
         "\n\nThis is a small API/SERVER — standard library only:\n"
@@ -267,6 +271,22 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
     def changed_nothing() -> bool:
         return not (project.diff() or "").strip()
 
+    def baseline_template() -> dict:
+        if kind == "game":
+            return template_files(game_template_for(task))
+        if kind == "pygame":
+            return template_files("pygame")
+        return template_files(kind)
+
+    def template_only() -> bool:
+        """A FRESH build whose files are byte-identical to the built-in starter — the model added nothing
+        of its own, so it's just the generic template (not really 'a chef landing page')."""
+        if is_modify or (starter and starter.get("files")):
+            return False                     # a modify, or a reused past solution, isn't 'just the template'
+        current = {name: project.read(name) for name in project.changed()}
+        base = baseline_template()
+        return bool(current) and bool(base) and current == base
+
     # For an EDIT, following the instruction matters more than speed, so use the STRONGER model first when
     # we have one (the fast model is the one that keeps "changing nothing"). A fresh build keeps the fast
     # model first with the stronger one as the fallback.
@@ -283,17 +303,23 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
                            is_modify=is_modify)
     result = build_and_test(project, propose, test_cmd=test_cmd, max_tries=tries, log=log)
 
-    # If the primary couldn't do it (or, for an edit, changed nothing), try the OTHER model.
+    # If the primary couldn't do it (an edit that changed nothing, OR a fresh build that only reproduced the
+    # built-in starter), try the OTHER model — the fast one often just hands back the template.
     no_change = is_modify and changed_nothing()
-    if (not result["ok"] or no_change) and secondary is not None:
+    tmpl_only = template_only()
+    if (not result["ok"] or no_change or tmpl_only) and secondary is not None:
         try:
             available = secondary.available()
         except Exception:  # noqa: BLE001
             available = False
         if available:
-            log("  that didn't apply the change — trying the other model…"
-                if no_change else
-                "  that model couldn't finish it — trying the other model…")
+            if no_change:
+                log("  that didn't apply the change — trying the other (stronger) model…")
+            elif tmpl_only:
+                log("  that only produced the generic starter — trying the other (stronger) model for a "
+                    "custom build (this is slower)…")
+            else:
+                log("  that model couldn't finish it — trying the other model…")
             current = {name: project.read(name) for name in project.changed()}
             files2 = current or (starter or {}).get("files", {})
             starter2 = {"task": (starter or {}).get("task", task), "files": files2} if files2 else starter
@@ -301,6 +327,7 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
                                     starter=starter2, is_modify=is_modify)
             result = build_and_test(project, propose2, test_cmd=test_cmd, max_tries=tries, log=log)
             no_change = is_modify and changed_nothing()
+            tmpl_only = template_only()
 
     if is_modify:
         # NEVER drop a template over the boss's existing project. If the model still changed nothing, say so
@@ -310,6 +337,11 @@ def run_build(task, project, llm, memory=None, test_cmd=None, tries=3, log=print
                 "Try rephrasing it more concretely (e.g. name the file/colour/number to change).")
             result = {"ok": False, "attempts": result.get("attempts", tries), "test": result.get("test"),
                       "diff": "", "failures": result.get("failures", []), "no_change": True}
+    elif tmpl_only:
+        # Both models only reproduced the starter — be honest it's a starter, not the custom thing asked for.
+        log("  neither model built a custom version — leaving you the working starter to build on. "
+            "Try a more specific request, or ask for the pieces one at a time.")
+        result["used_template"] = True
     elif not result["ok"]:
         # Fresh build last-resort: drop in the clean working template for this kind (or the reused past
         # solution) so a build ALWAYS leaves a runnable result.
@@ -402,8 +434,12 @@ def make_propose(generate, task: str, log=print, memory_note: str = "", starter:
             f"(paddle colours, speeds, levels, text, whatever the change needs). Do NOT return them "
             f"unchanged, and do NOT just describe the change — make it in the code:\n{files_txt[:8000]}")
     else:
-        starter_block = (f"\n\nHere is a WORKING starting point ({baseline_task!r}) that already runs and passes "
-                         f"its test — ADAPT it to the task, keeping what works (don't start from scratch):\n{files_txt[:8000]}")
+        starter_block = (
+            f"\n\nHere is a WORKING starting point ({baseline_task!r}) that already runs and passes its test. "
+            f"ADAPT it to THIS task: {task!r}. Keep the structure that works, but REPLACE the placeholder "
+            f"content (title, headings, text, colours, sections) with content specific to the request — do "
+            f"NOT return it unchanged or leave the sample 'My Site'/'Game' text. Start from it, don't start "
+            f"from scratch:\n{files_txt[:8000]}")
     log("  (changing your existing project: " + ", ".join(list(baseline_files)[:4]) + ")" if is_modify
         else f"  (starting from {baseline_task or 'a working template'} and adapting it)")
 
