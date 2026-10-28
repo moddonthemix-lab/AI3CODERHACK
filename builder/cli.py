@@ -71,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
     labsub.add_parser("off", help="turn it off and clear all authorizations")
     lg = labsub.add_parser("log", help="show the security audit log (what Builder allowed/refused)")
     lg.add_argument("--limit", type=int, default=20)
+    run = labsub.add_parser("run", help="run a recon/enum tool against an AUTHORIZED target (asks before each run)")
+    run.add_argument("tool", help="a recon/enum tool (nmap, gobuster, nikto, whatweb, enum4linux, curl, …)")
+    run.add_argument("target", help="the authorized target (must already be on record via 'lab on')")
+    run.add_argument("args", nargs="*", help="extra flags for the tool (the target is added automatically)")
+    run.add_argument("--yes", action="store_true", help="skip the per-run confirmation (still logged)")
+    labsub.add_parser("tools", help="list the recon/enum tools Builder can run (and which are installed)")
 
     sub.add_parser("doctor", help="Check Ollama, the coder models, the sandbox and the code-folder scope")
 
@@ -339,6 +345,35 @@ def _cmd_lab(args, config, db) -> int:
         return 0
     if action == "log":
         _print_rows(db.safety_events(args.limit), ["at", "action", "decision", "target", "detail", "reason"], width=40)
+        return 0
+    if action == "tools":
+        from .labtools import TOOLS, tool_available
+        print("Recon / enumeration tools Builder can run against an authorized target:\n")
+        for name, desc in sorted(TOOLS.items()):
+            print(f"  {'✓' if tool_available(name) else '·'} {name:14} {desc}")
+        print("\n  ✓ = installed.  Run one with:  builder lab run <tool> <target> [flags]")
+        return 0
+    if action == "run":
+        from .labtools import LabToolError, run_tool
+        from .safety import LabModeOff, SafetyError, TargetNotAuthorized
+
+        def approve(kind, detail, target):
+            if args.yes:
+                return True
+            ans = input(f"  Run `{args.tool} {' '.join(args.args)} {target}` against {target}? [y/N] ").strip().lower()
+            return ans in ("y", "yes")
+
+        try:
+            result = run_tool(config, db, args.tool, args.target, args.args, approve=approve, log=err)
+        except (LabModeOff, TargetNotAuthorized) as e:
+            err(f"✗ {e}")
+            return 1
+        except (LabToolError, SafetyError) as e:
+            err(f"✗ {e}")
+            return 1
+        print(result["output"] or "(no output)")
+        err(f"\n✓ {result['tool']} finished in {result['seconds']}s (logged). Next: ask Builder what the "
+            f"results mean and what to try next.")
         return 0
     return 0
 

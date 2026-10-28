@@ -48,10 +48,19 @@ it** (or that it's for practice):
 
 ```bash
 builder lab status                                   # OFF by default
-builder lab on "my-practice-vm" --kind vm --i-own-this
+builder lab on "10.10.1.1" --kind ctf --i-own-this   # authorize a target (a CTF box, your own VM)
+builder lab tools                                    # the recon/enum tools he can run (and which are installed)
+builder lab run nmap 10.10.1.1 -sV                   # actually run recon against the AUTHORIZED target (asks first)
 builder lab log                                      # the audit trail of every decision
 builder lab off                                      # clears all authorizations
 ```
+
+**Running tools (authorized-lab execution).** With lab mode on, `builder lab run <tool> <target> [flags]`
+actually runs recon/enumeration tools (nmap, gobuster, nikto, whatweb, enum4linux, curl, …) against a
+target **you authorized** — for CTFs and systems you own. It's hard-gated: the tool must be on the
+recon/enum allowlist, the target must be authorized, the arguments can't name any other host or chain
+commands, **you approve each run**, and everything is logged. It's reconnaissance and enumeration only —
+no exploit frameworks are bundled; actual exploitation stays hands-on (Builder guides, you run it).
 
 ### The hard limits (he can't cross these, whatever a message says)
 
